@@ -3,10 +3,12 @@ import { CATEGORIZATION_RULES } from '../data/seed'
 
 export interface ParsedCsvRow {
   date: string
+  /** Signed amount when the statement shows credits as negative. */
   amount: number
   merchant: string
   suggestedCategoryId: CategoryId
   suggestedAccountId: AccountId
+  isRefund?: boolean
 }
 
 export function suggestCategory(
@@ -37,37 +39,44 @@ export function parseStatementCsv(text: string): ParsedCsvRow[] {
     header.includes('merchant')
 
   const dataLines = hasHeader ? lines.slice(1) : lines
+  const rows: ParsedCsvRow[] = []
 
-  return dataLines
-    .map((line) => {
-      const parts = splitCsvLine(line)
-      if (parts.length < 3) return null
+  for (const line of dataLines) {
+    const parts = splitCsvLine(line)
+    if (parts.length < 3) continue
 
-      // Flexible: Date, Description/Merchant, Amount  OR  Date, Amount, Description
-      let date = parts[0]
-      let merchant = parts[1]
-      let amountRaw = parts[2]
+    // Flexible: Date, Description/Merchant, Amount  OR  Date, Amount, Description
+    let date = parts[0]
+    let merchant = parts[1]
+    let amountRaw = parts[2]
 
-      if (!isLikelyAmount(amountRaw) && isLikelyAmount(parts[1])) {
-        amountRaw = parts[1]
-        merchant = parts.slice(2).join(' ')
-      } else if (parts.length > 3 && !isLikelyAmount(amountRaw)) {
-        amountRaw = parts[parts.length - 1]
-        merchant = parts.slice(1, -1).join(' ')
-      }
+    if (!isLikelyAmount(amountRaw) && isLikelyAmount(parts[1])) {
+      amountRaw = parts[1]
+      merchant = parts.slice(2).join(' ')
+    } else if (parts.length > 3 && !isLikelyAmount(amountRaw)) {
+      amountRaw = parts[parts.length - 1]
+      merchant = parts.slice(1, -1).join(' ')
+    }
 
-      const amount = Math.abs(Number(String(amountRaw).replace(/[$,]/g, '')))
-      if (!date || !merchant || Number.isNaN(amount) || amount === 0) return null
+    const cleaned = String(amountRaw).replace(/[$,\s]/g, '')
+    const amount = Number(cleaned)
+    if (!date || !merchant || Number.isNaN(amount) || amount === 0) continue
 
-      return {
-        date: normalizeDate(date),
-        amount,
-        merchant: merchant.trim(),
-        suggestedCategoryId: suggestCategory(merchant),
-        suggestedAccountId: 'other' as AccountId,
-      }
+    const merchantClean = merchant.trim()
+    const looksLikeRefund =
+      amount < 0 || /refund|return|rebate|credit/i.test(merchantClean)
+
+    rows.push({
+      date: normalizeDate(date),
+      amount,
+      merchant: merchantClean,
+      suggestedCategoryId: suggestCategory(merchantClean),
+      suggestedAccountId: 'other',
+      isRefund: looksLikeRefund,
     })
-    .filter((row): row is ParsedCsvRow => row !== null)
+  }
+
+  return rows
 }
 
 function splitCsvLine(line: string): string[] {
@@ -91,7 +100,7 @@ function splitCsvLine(line: string): string[] {
 }
 
 function isLikelyAmount(v: string): boolean {
-  return /^-?\$?\d[\d,]*\.?\d*$/.test(v.trim())
+  return /^-?\$?\d[\d,]*\.?\d*$/.test(v.trim().replace(/\s/g, ''))
 }
 
 function normalizeDate(raw: string): string {

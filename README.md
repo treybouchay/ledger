@@ -25,8 +25,17 @@ From your sheet’s **Updated info March 2024** and **TrevorJune / Kate June** t
 - Transaction list
 - CSV upload → auto-suggest categories → import
 
+## Phase 2 — import review queue
+
+- Editable category, account, merchant, date, amount per row
+- Include / exclude rows before import
+- Bulk apply category / account / person
+- Refund detection (negative amounts + refund/return merchants)
+- Highlight rows still on **Other** or changed from the suggestion
+
 ## Next
 
+- Learn merchant → category rules from your corrections
 - Per-merchant line items instead of rolled seed totals
 - Editable budgets UI
 - Persist to localStorage / backend

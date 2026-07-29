@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { ImportReviewQueue } from './components/ImportReviewQueue'
 import {
   ACCOUNTS,
   ACTIVE_MONTH_ID,
@@ -8,8 +9,8 @@ import {
   SEED_TRANSACTIONS,
 } from './data/seed'
 import { formatMoney, summarizeMonth } from './lib/compute'
-import { parseStatementCsv, type ParsedCsvRow } from './lib/parseCsv'
-import type { AccountId, PersonId, Transaction } from './types'
+import type { ReviewDraftRow } from './lib/reviewDraft'
+import type { PersonId, Transaction } from './types'
 
 type Tab = 'overview' | 'categories' | 'transactions' | 'upload'
 
@@ -34,20 +35,18 @@ export default function App() {
   const trevor = summary.people.find((p) => p.personId === 'trevor')!
   const kate = summary.people.find((p) => p.personId === 'kate')!
 
-  function importRows(
-    rows: ParsedCsvRow[],
-    personId: PersonId,
-    accountId: AccountId,
-  ) {
+  function commitReviewed(rows: ReviewDraftRow[]) {
+    const stamp = Date.now()
     const next: Transaction[] = rows.map((row, i) => ({
-      id: `csv-${Date.now()}-${i}`,
-      personId,
+      id: `csv-${stamp}-${i}`,
+      personId: row.personId,
       monthId: ACTIVE_MONTH_ID,
       date: row.date,
       amount: row.amount,
       merchant: row.merchant,
-      accountId: row.suggestedAccountId === 'other' ? accountId : row.suggestedAccountId,
-      categoryId: row.suggestedCategoryId,
+      accountId: row.accountId,
+      categoryId: row.categoryId,
+      isRefund: row.isRefund,
       source: 'csv',
     }))
     setTransactions((prev) => [...prev, ...next])
@@ -197,7 +196,8 @@ export default function App() {
                     ) : null}
                   </td>
                   <td>
-                    {ACCOUNTS.find((a) => a.id === t.accountId)?.label ?? t.accountId}
+                    {ACCOUNTS.find((a) => a.id === t.accountId)?.label ??
+                      t.accountId}
                   </td>
                   <td>
                     {CATEGORIES.find((c) => c.id === t.categoryId)?.label ??
@@ -214,7 +214,7 @@ export default function App() {
         </section>
       )}
 
-      {tab === 'upload' && <UploadPanel onImport={importRows} />}
+      {tab === 'upload' && <ImportReviewQueue onCommit={commitReviewed} />}
     </div>
   )
 }
@@ -262,102 +262,5 @@ function PersonCard({
         </div>
       </dl>
     </article>
-  )
-}
-
-function UploadPanel({
-  onImport,
-}: {
-  onImport: (
-    rows: ParsedCsvRow[],
-    personId: PersonId,
-    accountId: AccountId,
-  ) => void
-}) {
-  const [personId, setPersonId] = useState<PersonId>('trevor')
-  const [accountId, setAccountId] = useState<AccountId>('amex')
-  const [preview, setPreview] = useState<ParsedCsvRow[]>([])
-
-  async function onFile(file: File | null) {
-    if (!file) return
-    const text = await file.text()
-    setPreview(parseStatementCsv(text))
-  }
-
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Upload statement CSV</h2>
-        <p>Date, merchant, amount — rules suggest categories</p>
-      </div>
-      <div className="upload-box">
-        <p className="hint">
-          Example headers: <code>Date,Description,Amount</code>. Matching rules
-          cover Metro, Starbucks, Amazon, LCBO, gas stations, and more from your
-          June merchants.
-        </p>
-        <label>
-          Person
-          <select
-            value={personId}
-            onChange={(e) => setPersonId(e.target.value as PersonId)}
-          >
-            {PEOPLE.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Account / card
-          <select
-            value={accountId}
-            onChange={(e) => setAccountId(e.target.value as AccountId)}
-          >
-            {ACCOUNTS.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          CSV file
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-          />
-        </label>
-
-        {preview.length > 0 && (
-          <>
-            <div className="preview-list">
-              {preview.slice(0, 40).map((row, i) => (
-                <div className="preview-row" key={`${row.merchant}-${i}`}>
-                  <div>
-                    <strong>{row.merchant}</strong>
-                    <div className="preview-meta">
-                      {row.date} ·{' '}
-                      {CATEGORIES.find((c) => c.id === row.suggestedCategoryId)
-                        ?.label ?? row.suggestedCategoryId}
-                    </div>
-                  </div>
-                  <div className="num">{formatMoney(row.amount)}</div>
-                </div>
-              ))}
-            </div>
-            <button
-              type="button"
-              className="primary"
-              onClick={() => onImport(preview, personId, accountId)}
-            >
-              Import {preview.length} transactions
-            </button>
-          </>
-        )}
-      </div>
-    </section>
   )
 }
