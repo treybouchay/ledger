@@ -33,6 +33,42 @@ From your sheet’s **Updated info March 2024** and **TrevorJune / Kate June** t
 - Refund detection (negative amounts + refund/return merchants)
 - Highlight rows still on **Other** or changed from the suggestion
 
+## Deploy (DigitalOcean App Platform)
+
+This app is a static Vite build (`dist/`). Data lives in the browser’s `localStorage`, so each device/browser has its own copy.
+
+### 1. Push the repo to GitHub
+
+There is no remote yet. Create a private GitHub repo, then:
+
+```bash
+git remote add origin git@github.com:YOUR_USER/household-ledger.git
+git push -u origin main
+```
+
+### 2. Create the App Platform static site
+
+1. Open [cloud.digitalocean.com/apps](https://cloud.digitalocean.com/apps) → **Create App**
+2. Connect GitHub and select `household-ledger` (`main`)
+3. Set resource type to **Static Site**
+4. Build command: `npm ci && npm run build`
+5. Output directory: `dist`
+6. Catchall document: `index.html`
+7. Choose the free **Starter** plan (static sites)
+
+Spec file for CLI deploys: [`.do/app.yaml`](.do/app.yaml) — replace `REPLACE_ME/household-ledger` with your repo, then:
+
+```bash
+brew install doctl
+doctl auth init
+doctl apps create --spec .do/app.yaml
+```
+
+### 3. After first deploy
+
+- Confirm the `*.ondigitalocean.app` URL loads
+- Optional: attach a custom domain under the app’s **Settings**
+
 ## Next
 
 - Learn merchant → category rules from your corrections

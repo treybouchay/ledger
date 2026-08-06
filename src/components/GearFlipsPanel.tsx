@@ -24,19 +24,25 @@ import {
   reconcileSeedCashDates,
   removeCashMove,
   sortCashMoves,
-  suggestBuyItemNames,
   suggestSellItemNames,
   sumNullable,
   syncPlannerMonths,
   unlinkCashMove,
+  type SellItemSuggestion,
 } from '../lib/gearStorage'
+import {
+  emptyGearTags,
+  formatGearItemLabel,
+} from '../lib/gearTags'
 import {
   readGearSubTab,
   writeGearSubTab,
   type GearSubTab,
 } from '../lib/nav'
+import { GearItemTagsFields, GearTagPills } from './GearItemTags'
 import type {
   GearCashMove,
+  GearItemTags,
   GearKeepItem,
   GearListingStatus,
   GearMonth,
@@ -62,8 +68,22 @@ function moneyCell(n: number | null | undefined): string {
 
 function cashMoveMatchesSearch(move: GearCashMove, q: string): boolean {
   if (!q) return true
+  const tagBits = [
+    move.tags?.kind,
+    move.tags?.level,
+    move.tags?.size,
+    move.tags?.gloveSize,
+    move.tags?.colour,
+    move.tags?.brand,
+    move.tags?.detail,
+    move.tags?.kind === 'set_gloves' ? 'glove set blocker catcher' : '',
+    move.tags?.kind === 'set_full' ? 'full set pads blocker catcher glove' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   const parts = [
     move.item ?? '',
+    tagBits,
     move.type ?? '',
     move.date?.slice(0, 10) ?? '',
     String(move.amount),
@@ -74,6 +94,12 @@ function cashMoveMatchesSearch(move: GearCashMove, q: string): boolean {
     move.listingStatus === 'not_listed' ? 'not listed' : '',
   ]
   return parts.join(' ').toLowerCase().includes(q)
+}
+
+function tagsReady(tags: GearItemTags): boolean {
+  if (!tags.kind) return false
+  if (tags.kind !== 'other' && !tags.level) return false
+  return Boolean(formatGearItemLabel(tags))
 }
 
 function IconEdit() {
@@ -406,8 +432,22 @@ function projectedManualMatchesSearch(
   q: string,
 ): boolean {
   if (!q) return true
+  const tagBits = [
+    row.tags?.kind,
+    row.tags?.level,
+    row.tags?.size,
+    row.tags?.gloveSize,
+    row.tags?.colour,
+    row.tags?.brand,
+    row.tags?.detail,
+    row.tags?.kind === 'set_gloves' ? 'glove set blocker catcher' : '',
+    row.tags?.kind === 'set_full' ? 'full set pads blocker catcher glove' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   const parts = [
     row.item ?? '',
+    tagBits,
     row.date?.slice(0, 10) ?? '',
     String(row.cost),
     formatMoney(row.cost),
@@ -445,12 +485,12 @@ function ProjectedProfitView({
 }) {
   const [filterSearch, setFilterSearch] = useState('')
   const [addDate, setAddDate] = useState('')
-  const [addItem, setAddItem] = useState('')
+  const [addTags, setAddTags] = useState<GearItemTags>(() => emptyGearTags())
   const [addCost, setAddCost] = useState('')
   const [addTarget, setAddTarget] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDate, setEditDate] = useState('')
-  const [editItem, setEditItem] = useState('')
+  const [editTags, setEditTags] = useState<GearItemTags>(() => emptyGearTags())
   const [editCost, setEditCost] = useState('')
   const [editTarget, setEditTarget] = useState('')
   const [pickFromBuysOpen, setPickFromBuysOpen] = useState(false)
@@ -605,7 +645,8 @@ function ProjectedProfitView({
   function submitManual(e: FormEvent) {
     e.preventDefault()
     if (!month) return
-    const name = addItem.trim()
+    if (!tagsReady(addTags)) return
+    const name = formatGearItemLabel(addTags)
     const costN = Number(addCost)
     if (!name || !Number.isFinite(costN) || costN < 0) return
     const targetRaw = addTarget.trim()
@@ -619,12 +660,13 @@ function ProjectedProfitView({
       id: `proj-manual-${Date.now().toString(36)}`,
       monthId: month.id,
       item: name,
+      tags: { ...addTags },
       cost: Math.round(costN * 100) / 100,
       targetSold,
       date: addDate.trim() || null,
     }
     onChangeManualRows([...manualRows, entry])
-    setAddItem('')
+    setAddTags(emptyGearTags())
     setAddCost('')
     setAddTarget('')
     setAddDate('')
@@ -633,7 +675,7 @@ function ProjectedProfitView({
   function startEditManual(row: GearProjectedManualRow) {
     setEditingId(row.id)
     setEditDate(row.date?.slice(0, 10) ?? '')
-    setEditItem(row.item)
+    setEditTags(row.tags ? { ...row.tags } : emptyGearTags())
     setEditCost(String(row.cost))
     setEditTarget(row.targetSold != null ? String(row.targetSold) : '')
   }
@@ -643,7 +685,8 @@ function ProjectedProfitView({
   }
 
   function saveEditManual(row: GearProjectedManualRow) {
-    const name = editItem.trim()
+    if (!tagsReady(editTags)) return
+    const name = formatGearItemLabel(editTags)
     const costN = Number(editCost)
     if (!name || !Number.isFinite(costN) || costN < 0) return
     const targetRaw = editTarget.trim()
@@ -659,6 +702,7 @@ function ProjectedProfitView({
           ? {
               ...r,
               item: name,
+              tags: { ...editTags },
               cost: Math.round(costN * 100) / 100,
               targetSold,
               date: editDate.trim() || null,
@@ -936,16 +980,6 @@ function ProjectedProfitView({
                 onChange={(e) => setAddDate(e.target.value)}
               />
             </label>
-            <label className="span-2">
-              Item
-              <input
-                value={addItem}
-                onChange={(e) => setAddItem(e.target.value)}
-                placeholder="What are you projecting?"
-                required
-                autoComplete="off"
-              />
-            </label>
             <label>
               Cost
               <div className="cash-amount-wrap">
@@ -976,9 +1010,14 @@ function ProjectedProfitView({
               </div>
             </label>
           </div>
+          <GearItemTagsFields value={addTags} onChange={setAddTags} />
           <div className="cash-compose-actions">
             <p className="hint">Adds to {month.label} only</p>
-            <button type="submit" className="primary">
+            <button
+              type="submit"
+              className="primary"
+              disabled={!tagsReady(addTags)}
+            >
               Add
             </button>
           </div>
@@ -1030,6 +1069,7 @@ function ProjectedProfitView({
                       <div className="cash-move-item">
                         {move.item || 'Untitled'}
                       </div>
+                      <GearTagPills tags={move.tags} />
                       <div className="cash-move-meta">
                         <time className="cash-move-date">
                           {move.date?.slice(0, 10) || 'No date'}
@@ -1148,6 +1188,7 @@ function ProjectedProfitView({
                   <CashMoveRail tone="out" />
                   <div className="cash-move-main">
                     <div className="cash-move-item">{row.item}</div>
+                    <GearTagPills tags={row.tags} />
                     <div className="cash-move-meta">
                       <time className="cash-move-date">
                         {row.date?.slice(0, 10) || 'No date'}
@@ -1253,14 +1294,6 @@ function ProjectedProfitView({
                             onChange={(e) => setEditDate(e.target.value)}
                           />
                         </label>
-                        <label className="span-2">
-                          Item
-                          <input
-                            value={editItem}
-                            onChange={(e) => setEditItem(e.target.value)}
-                            required
-                          />
-                        </label>
                         <label>
                           Cost
                           <div className="cash-amount-wrap">
@@ -1290,6 +1323,7 @@ function ProjectedProfitView({
                           </div>
                         </label>
                       </div>
+                      <GearItemTagsFields value={editTags} onChange={setEditTags} />
                       <div className="cash-move-edit-actions">
                         <button
                           type="button"
@@ -1305,6 +1339,7 @@ function ProjectedProfitView({
                           className="icon-btn primary"
                           title="Save"
                           aria-label="Save"
+                          disabled={!tagsReady(editTags)}
                         >
                           <IconCheck />
                         </button>
@@ -1363,7 +1398,7 @@ function CashLedger({
 }) {
   const [mode, setMode] = useState<'in' | 'out'>('out')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
-  const [item, setItem] = useState('')
+  const [tags, setTags] = useState<GearItemTags>(() => emptyGearTags())
   const [amount, setAmount] = useState('')
   const [soldVia, setSoldVia] = useState<GearSoldVia | null>(null)
   const [showBuys, setShowBuys] = useState(true)
@@ -1384,7 +1419,7 @@ function CashLedger({
   const [linkingId, setLinkingId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDate, setEditDate] = useState('')
-  const [editItem, setEditItem] = useState('')
+  const [editTags, setEditTags] = useState<GearItemTags>(() => emptyGearTags())
   const [editAmount, setEditAmount] = useState('')
   const [editSoldVia, setEditSoldVia] = useState<GearSoldVia | null>(null)
   const [cashMathOpen, setCashMathOpen] = useState(false)
@@ -1421,8 +1456,8 @@ function CashLedger({
     [moves, excludedBuys],
   )
 
-  function filterSellSuggestions(query: string) {
-    const q = normalizeCashItem(query)
+  function filterSellSuggestions(queryLabel: string) {
+    const q = normalizeCashItem(queryLabel)
     const list = q
       ? sellItemSuggestions.filter(
           (s) => s.key.includes(q) || normalizeCashItem(s.label).includes(q),
@@ -1431,13 +1466,28 @@ function CashLedger({
     return list.slice(0, 10)
   }
 
-  function renderSellItemSuggestions(
-    currentValue: string,
-    onPick: (label: string) => void,
+  function applySellSuggestion(
+    s: SellItemSuggestion,
+    apply: (next: GearItemTags) => void,
   ) {
-    const chips = filterSellSuggestions(currentValue)
+    if (s.tags) {
+      apply({ ...s.tags })
+      return
+    }
+    apply({
+      ...emptyGearTags(),
+      kind: 'other',
+      detail: s.label,
+    })
+  }
+
+  function renderSellItemSuggestions(
+    currentLabel: string,
+    apply: (next: GearItemTags) => void,
+  ) {
+    const chips = filterSellSuggestions(currentLabel)
     if (!chips.length) return null
-    const selectedKey = normalizeCashItem(currentValue)
+    const selectedKey = normalizeCashItem(currentLabel)
     return (
       <div className="cash-item-suggest">
         <span className="cash-item-suggest-label">From inventory</span>
@@ -1449,60 +1499,13 @@ function CashLedger({
               className={`cash-item-suggest-chip${selectedKey === s.key ? ' active' : ''}`}
               title={`Unmatched buy value ${formatMoney(s.remaining)}`}
               aria-pressed={selectedKey === s.key}
-              onClick={() => onPick(s.label)}
+              onClick={() => applySellSuggestion(s, apply)}
             >
               {s.label}
             </button>
           ))}
         </div>
       </div>
-    )
-  }
-
-  function renderBuyItemSuggestions(
-    currentValue: string,
-    onPick: (value: string) => void,
-    listId: string,
-  ) {
-    const chips = suggestBuyItemNames(moves, keepList, currentValue, 10)
-    if (!chips.length) return null
-    const selectedKey = normalizeCashItem(currentValue)
-    const kindLabel = (kind: (typeof chips)[number]['kind']) => {
-      if (kind === 'brand') return 'Brand'
-      if (kind === 'model') return 'Model'
-      return 'Past item'
-    }
-    return (
-      <>
-        <div className="cash-item-suggest">
-          <span className="cash-item-suggest-label">Suggestions</span>
-          <div
-            className="cash-item-suggest-chips"
-            role="group"
-            aria-label="Suggested brands and item names"
-          >
-            {chips.map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                className={`cash-item-suggest-chip${
-                  selectedKey === normalizeCashItem(s.value) ? ' active' : ''
-                }`}
-                title={`${kindLabel(s.kind)} · seen ${s.count}×`}
-                aria-pressed={selectedKey === normalizeCashItem(s.value)}
-                onClick={() => onPick(s.value)}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <datalist id={listId}>
-          {chips.map((s) => (
-            <option key={s.key} value={s.value} />
-          ))}
-        </datalist>
-      </>
     )
   }
 
@@ -1648,7 +1651,15 @@ function CashLedger({
     setSummaryId(null)
     setEditingId(move.id)
     setEditDate(move.date?.slice(0, 10) || '')
-    setEditItem(move.item || '')
+    setEditTags(
+      move.tags
+        ? { ...move.tags }
+        : {
+            ...emptyGearTags(),
+            kind: 'other',
+            detail: move.item || null,
+          },
+    )
     setEditAmount(String(move.amount))
     setEditSoldVia(move.soldVia ?? null)
   }
@@ -1660,14 +1671,16 @@ function CashLedger({
   function saveEdit(move: GearCashMove) {
     const n = Number(editAmount)
     if (!Number.isFinite(n) || n <= 0) return
+    if (!tagsReady(editTags)) return
     const nextDate = editDate || null
-    const nextItem = editItem.trim() || null
+    const nextItem = formatGearItemLabel(editTags) || null
     const patched = moves.map((m) =>
       m.id === move.id
         ? {
             ...m,
             date: nextDate,
             item: nextItem,
+            tags: { ...editTags },
             amount: n,
             soldVia: m.direction === 'in' ? editSoldVia : null,
             // Allow same-name rematch after edits.
@@ -1808,11 +1821,14 @@ function CashLedger({
     e.preventDefault()
     const n = Number(amount)
     if (!Number.isFinite(n) || n <= 0) return
+    if (!tagsReady(tags)) return
+    const label = formatGearItemLabel(tags)
     const move: GearCashMove = {
       id: `cash-${Date.now()}`,
       date: date || null,
       type: mode === 'in' ? 'SELL' : 'BUY',
-      item: item.trim() || null,
+      item: label || null,
+      tags: { ...tags },
       amount: n,
       direction: mode,
       soldVia: mode === 'in' ? soldVia : null,
@@ -1822,7 +1838,7 @@ function CashLedger({
       createdAt: new Date().toISOString(),
     }
     onChangeMoves(autoLinkCashMoves(insertCashMoveSorted(moves, move)))
-    setItem('')
+    setTags(emptyGearTags())
     setAmount('')
     if (mode === 'in') setSoldVia(null)
   }
@@ -1966,20 +1982,6 @@ function CashLedger({
               onChange={(e) => setEditDate(e.target.value)}
             />
           </label>
-          <label className="span-2">
-            Item
-            <input
-              value={editItem}
-              onChange={(e) => setEditItem(e.target.value)}
-              placeholder="Item name"
-              list={
-                move.direction === 'in'
-                  ? 'cash-sell-item-suggestions-edit'
-                  : 'cash-buy-item-suggestions-edit'
-              }
-              autoComplete="off"
-            />
-          </label>
           <label>
             Amount
             <div className="cash-amount-wrap">
@@ -1997,28 +1999,19 @@ function CashLedger({
             </div>
           </label>
         </div>
+        <GearItemTagsFields value={editTags} onChange={setEditTags} />
         {move.direction === 'in' ? (
           <>
-            {renderSellItemSuggestions(editItem, setEditItem)}
-            {sellItemSuggestions.length > 0 ? (
-              <datalist id="cash-sell-item-suggestions-edit">
-                {sellItemSuggestions.map((s) => (
-                  <option key={s.key} value={s.label} />
-                ))}
-              </datalist>
-            ) : null}
+            {renderSellItemSuggestions(
+              formatGearItemLabel(editTags),
+              setEditTags,
+            )}
             <label className="cash-via-field">
               Sold on
               <SoldViaPicker value={editSoldVia} onChange={setEditSoldVia} />
             </label>
           </>
-        ) : (
-          renderBuyItemSuggestions(
-            editItem,
-            setEditItem,
-            'cash-buy-item-suggestions-edit',
-          )
-        )}
+        ) : null}
         <div className="cash-move-edit-actions">
           <button
             type="button"
@@ -2034,6 +2027,7 @@ function CashLedger({
             className="icon-btn primary"
             title="Save"
             aria-label="Save"
+            disabled={!tagsReady(editTags)}
           >
             <IconCheck />
           </button>
@@ -2065,6 +2059,7 @@ function CashLedger({
         <CashMoveRail tone={isSell ? 'in' : 'out'} />
         <div className="cash-move-main">
           <div className="cash-move-item">{move.item || 'Untitled'}</div>
+          <GearTagPills tags={move.tags} />
           <div className="cash-move-meta">
             <time className="cash-move-date">
               {move.date?.slice(0, 10) || 'No date'}
@@ -2417,24 +2412,6 @@ function CashLedger({
                 required
               />
             </label>
-            <label className="span-2">
-              Item
-              <input
-                value={item}
-                onChange={(e) => setItem(e.target.value)}
-                placeholder={
-                  mode === 'out' ? 'What did you buy?' : 'What did you sell?'
-                }
-                list={
-                  mode === 'in'
-                    ? 'cash-sell-item-suggestions'
-                    : mode === 'out'
-                      ? 'cash-buy-item-suggestions'
-                      : undefined
-                }
-                autoComplete="off"
-              />
-            </label>
             <label>
               Amount
               <div className="cash-amount-wrap">
@@ -2451,35 +2428,27 @@ function CashLedger({
               </div>
             </label>
           </div>
+          <GearItemTagsFields value={tags} onChange={setTags} />
           {mode === 'in' ? (
             <>
-              {renderSellItemSuggestions(item, setItem)}
-              {sellItemSuggestions.length > 0 ? (
-                <datalist id="cash-sell-item-suggestions">
-                  {sellItemSuggestions.map((s) => (
-                    <option key={s.key} value={s.label} />
-                  ))}
-                </datalist>
-              ) : null}
+              {renderSellItemSuggestions(formatGearItemLabel(tags), setTags)}
               <label className="cash-via-field">
                 Sold on
                 <SoldViaPicker value={soldVia} onChange={setSoldVia} />
               </label>
             </>
-          ) : (
-            renderBuyItemSuggestions(
-              item,
-              setItem,
-              'cash-buy-item-suggestions',
-            )
-          )}
+          ) : null}
           <div className="cash-compose-actions">
             <p className="hint">
               {mode === 'in'
-                ? 'Creates a sell row only'
-                : 'Creates a buy row only'}
+                ? 'Pick type + level (or inventory chip) · creates a sell row'
+                : 'Pick type + level · creates a buy row'}
             </p>
-            <button type="submit" className="primary">
+            <button
+              type="submit"
+              className="primary"
+              disabled={!tagsReady(tags)}
+            >
               {mode === 'in' ? 'Add sell' : 'Add buy'}
             </button>
           </div>
@@ -2701,12 +2670,12 @@ function KeepListPanel({
   keepList: GearKeepItem[]
   onChange: (next: GearKeepItem[]) => void
 }) {
-  const [item, setItem] = useState('')
+  const [tags, setTags] = useState<GearItemTags>(() => emptyGearTags())
   const [notes, setNotes] = useState('')
   const [date, setDate] = useState('')
   const [cost, setCost] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editItem, setEditItem] = useState('')
+  const [editTags, setEditTags] = useState<GearItemTags>(() => emptyGearTags())
   const [editNotes, setEditNotes] = useState('')
   const [editDate, setEditDate] = useState('')
   const [editCost, setEditCost] = useState('')
@@ -2726,12 +2695,14 @@ function KeepListPanel({
 
   function submitAdd(e: FormEvent) {
     e.preventDefault()
-    const name = item.trim()
+    if (!tagsReady(tags)) return
+    const name = formatGearItemLabel(tags)
     if (!name) return
     const parsedCost = cost.trim() ? Number(cost) : null
     const entry: GearKeepItem = {
       id: `keep-${Date.now().toString(36)}`,
       item: name,
+      tags: { ...tags },
       notes: notes.trim() || null,
       date: date.trim() || null,
       cost:
@@ -2742,7 +2713,7 @@ function KeepListPanel({
       createdAt: new Date().toISOString(),
     }
     onChange([entry, ...keepList])
-    setItem('')
+    setTags(emptyGearTags())
     setNotes('')
     setDate('')
     setCost('')
@@ -2750,7 +2721,11 @@ function KeepListPanel({
 
   function startEdit(row: GearKeepItem) {
     setEditingId(row.id)
-    setEditItem(row.item)
+    setEditTags(
+      row.tags
+        ? { ...row.tags }
+        : { ...emptyGearTags(), kind: 'other', detail: row.item },
+    )
     setEditNotes(row.notes ?? '')
     setEditDate(row.date?.slice(0, 10) ?? '')
     setEditCost(row.cost != null ? String(row.cost) : '')
@@ -2761,7 +2736,8 @@ function KeepListPanel({
   }
 
   function saveEdit(row: GearKeepItem) {
-    const name = editItem.trim()
+    if (!tagsReady(editTags)) return
+    const name = formatGearItemLabel(editTags)
     if (!name) return
     const parsedCost = editCost.trim() ? Number(editCost) : null
     onChange(
@@ -2770,6 +2746,7 @@ function KeepListPanel({
           ? {
               ...k,
               item: name,
+              tags: { ...editTags },
               notes: editNotes.trim() || null,
               date: editDate.trim() || null,
               cost:
@@ -2805,15 +2782,6 @@ function KeepListPanel({
 
         <form className="cash-compose keep-compose" onSubmit={submitAdd}>
           <div className="cash-compose-fields">
-            <label className="span-2">
-              Item
-              <input
-                value={item}
-                onChange={(e) => setItem(e.target.value)}
-                placeholder="Item name"
-                required
-              />
-            </label>
             <label>
               Date
               <input
@@ -2845,8 +2813,13 @@ function KeepListPanel({
               />
             </label>
           </div>
+          <GearItemTagsFields value={tags} onChange={setTags} />
           <div className="cash-compose-actions">
-            <button type="submit" className="primary">
+            <button
+              type="submit"
+              className="primary"
+              disabled={!tagsReady(tags)}
+            >
               Add to keep list
             </button>
           </div>
@@ -2869,6 +2842,7 @@ function KeepListPanel({
                   <CashMoveRail tone="out" />
                   <div className="cash-move-main">
                     <div className="cash-move-item">{row.item}</div>
+                    <GearTagPills tags={row.tags} />
                     <div className="cash-move-meta">
                       <time className="cash-move-date">
                         {row.date?.slice(0, 10) || 'No date'}
@@ -2923,14 +2897,6 @@ function KeepListPanel({
                       }}
                     >
                       <div className="cash-move-edit-fields">
-                        <label className="span-2">
-                          Item
-                          <input
-                            value={editItem}
-                            onChange={(e) => setEditItem(e.target.value)}
-                            required
-                          />
-                        </label>
                         <label>
                           Date
                           <input
@@ -2960,6 +2926,10 @@ function KeepListPanel({
                           />
                         </label>
                       </div>
+                      <GearItemTagsFields
+                        value={editTags}
+                        onChange={setEditTags}
+                      />
                       <div className="cash-move-edit-actions">
                         <button
                           type="button"
@@ -2975,6 +2945,7 @@ function KeepListPanel({
                           className="icon-btn primary"
                           title="Save"
                           aria-label="Save"
+                          disabled={!tagsReady(editTags)}
                         >
                           <IconCheck />
                         </button>
@@ -3092,6 +3063,7 @@ function CashHistory({
                     <div className="cash-move-item">
                       {move.item || 'Untitled'}
                     </div>
+                    <GearTagPills tags={move.tags} />
                     <div className="cash-move-meta">
                       <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
                         {isSell ? 'Sell' : 'Buy'}
@@ -3225,6 +3197,7 @@ export function GearFlipsPanel({
     const entry: GearKeepItem = {
       id: `keep-${Date.now().toString(36)}`,
       item: (move.item ?? '').trim() || 'Untitled',
+      tags: move.tags ? { ...move.tags } : null,
       notes: null,
       date: move.date?.slice(0, 10) ?? null,
       cost: move.amount,

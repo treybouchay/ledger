@@ -3,8 +3,10 @@ import {
   GEAR_MONTHS_SEED,
   GEAR_OPENING_BALANCE,
 } from '../data/gearSeed'
+import { gearTagsEqual } from './gearTags'
 import type {
   GearCashMove,
+  GearItemTags,
   GearKeepItem,
   GearListingStatus,
   GearMonth,
@@ -545,6 +547,19 @@ export function scoreLinkCandidate(
     }
   }
 
+  const srcTags = source.tags
+  const candTags = candidate.tags
+  if (srcTags?.kind && candTags?.kind) {
+    if (gearTagsEqual(srcTags, candTags)) score += 90
+    else {
+      if (srcTags.kind === candTags.kind) score += 25
+      if (srcTags.level && srcTags.level === candTags.level) score += 15
+      if (srcTags.size && srcTags.size === candTags.size) score += 20
+      if (srcTags.brand && srcTags.brand === candTags.brand) score += 15
+      if (srcTags.colour && srcTags.colour === candTags.colour) score += 10
+    }
+  }
+
   const maxAmt = Math.max(source.amount, candidate.amount, 0.01)
   const amtRatio = Math.abs(source.amount - candidate.amount) / maxAmt
   if (amtRatio <= 0.02) score += 45
@@ -617,6 +632,8 @@ export type SellItemSuggestion = {
   label: string
   /** Buy value still unmatched by linked sells. */
   remaining: number
+  /** Structured tags from a matching buy, when available. */
+  tags?: GearItemTags | null
 }
 
 /**
@@ -629,20 +646,30 @@ export function suggestSellItemNames(
   moves: GearCashMove[],
   excludeBuyIds?: ReadonlySet<string> | readonly string[],
 ): SellItemSuggestion[] {
-  type Acc = { label: string; remaining: number; priority: number }
+  type Acc = {
+    label: string
+    remaining: number
+    priority: number
+    tags?: GearItemTags | null
+  }
   const byKey = new Map<string, Acc>()
   const excluded =
     excludeBuyIds instanceof Set
       ? excludeBuyIds
       : new Set(excludeBuyIds ?? [])
 
-  function bump(label: string, remaining: number, priority: number) {
+  function bump(
+    label: string,
+    remaining: number,
+    priority: number,
+    tags?: GearItemTags | null,
+  ) {
     const key = normalizeCashItem(label)
     const trimmed = label.trim()
     if (!key || !trimmed || remaining <= 0) return
     const prev = byKey.get(key)
     if (!prev) {
-      byKey.set(key, { label: trimmed, remaining, priority })
+      byKey.set(key, { label: trimmed, remaining, priority, tags })
       return
     }
     byKey.set(key, {
@@ -650,6 +677,7 @@ export function suggestSellItemNames(
       remaining:
         Math.round((prev.remaining + remaining) * 100) / 100,
       priority: Math.max(prev.priority, priority),
+      tags: prev.tags ?? tags,
     })
   }
 
@@ -658,7 +686,7 @@ export function suggestSellItemNames(
     if (excluded.has(buy.id)) continue
     const label = (buy.item ?? '').trim()
     if (!label) continue
-    bump(label, buy.amount, 2)
+    bump(label, buy.amount, 2, buy.tags)
   }
 
   const groups = new Map<string, GearCashMove[]>()
@@ -685,19 +713,22 @@ export function suggestSellItemNames(
     if (namedPurchased <= 0) continue
 
     const priority = groupSells.length === 0 ? 2 : 1
-    const nameTotals = new Map<string, { label: string; amount: number }>()
+    const nameTotals = new Map<
+      string,
+      { label: string; amount: number; tags?: GearItemTags | null }
+    >()
     for (const b of namedBuys) {
       const label = (b.item ?? '').trim()
       const key = normalizeCashItem(label)
       const prev = nameTotals.get(key)
       if (prev) prev.amount = Math.round((prev.amount + b.amount) * 100) / 100
-      else nameTotals.set(key, { label, amount: b.amount })
+      else nameTotals.set(key, { label, amount: b.amount, tags: b.tags })
     }
 
-    for (const { label, amount } of nameTotals.values()) {
+    for (const { label, amount, tags } of nameTotals.values()) {
       const share =
         Math.round(remaining * (amount / namedPurchased) * 100) / 100
-      bump(label, share, priority)
+      bump(label, share, priority, tags)
     }
   }
 
@@ -707,6 +738,7 @@ export function suggestSellItemNames(
       label: v.label,
       remaining: v.remaining,
       priority: v.priority,
+      tags: v.tags,
     }))
     .sort(
       (a, b) =>
@@ -714,7 +746,12 @@ export function suggestSellItemNames(
         b.remaining - a.remaining ||
         a.label.localeCompare(b.label),
     )
-    .map(({ key, label, remaining }) => ({ key, label, remaining }))
+    .map(({ key, label, remaining, tags }) => ({
+      key,
+      label,
+      remaining,
+      tags: tags ?? null,
+    }))
 }
 
 /** Typing prediction for the buy item field (brand / model / full name). */

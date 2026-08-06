@@ -1,0 +1,19 @@
+# DigitalOcean App Platform spec — static Vite/React site.
+# Create with: doctl apps create --spec .do/app.yaml
+# Or connect the GitHub repo in the DO control panel (Create App → Static Site).
+
+name: household-ledger
+region: tor
+
+static_sites:
+  - name: web
+    github:
+      repo: treybouchay/ledger
+      branch: main
+      deploy_on_push: true
+    build_command: npm ci && npm run build
+    output_dir: dist
+    environment_slug: node-js
+    catchall_document: index.html
+    routes:
+      - path: /

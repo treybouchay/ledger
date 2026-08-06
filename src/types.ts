@@ -192,6 +192,35 @@ export interface GearInventoryItem {
 
 export type GearSoldVia = 'fb' | 'kijiji' | 'ss'
 
+/** Standardized flip catalog — pads / gloves / chest / pants / sets. */
+export type GearKind =
+  | 'pads'
+  | 'blocker'
+  | 'catcher'
+  | 'chestie'
+  | 'pants'
+  /** Blocker + catcher sold together. */
+  | 'set_gloves'
+  /** Pads + blocker + catcher sold together. */
+  | 'set_full'
+  | 'other'
+
+export type GearLevel = 'intermediate' | 'senior'
+
+/** Structured product tags so entries stay comparable across flips. */
+export interface GearItemTags {
+  kind?: GearKind | null
+  level?: GearLevel | null
+  /** Pads / full set: 34+2 etc. Gloves/chest/pants/glove set: S–XXL or custom. */
+  size?: string | null
+  /** Blocker/catcher size on a full set (pads use `size`). */
+  gloveSize?: string | null
+  colour?: string | null
+  brand?: string | null
+  /** Model / extra detail (e.g. Hyperlite 2, eflex 6.9). */
+  detail?: string | null
+}
+
 export interface GearSale {
   id: string
   soldDate?: string | null
@@ -227,6 +256,8 @@ export interface GearCashMove {
   date?: string | null
   type: GearCashType
   item?: string | null
+  /** Structured product tags — preferred over free-text alone. */
+  tags?: GearItemTags | null
   amount: number
   direction: 'in' | 'out'
   /** Where a sell happened — Facebook, Kijiji, or SidelineSwap. */
@@ -253,6 +284,7 @@ export interface GearCashMove {
 export interface GearKeepItem {
   id: string
   item: string
+  tags?: GearItemTags | null
   notes?: string | null
   date?: string | null
   cost?: number | null
@@ -269,6 +301,7 @@ export interface GearProjectedManualRow {
   id: string
   monthId: string
   item: string
+  tags?: GearItemTags | null
   cost: number
   targetSold?: number | null
   date?: string | null
