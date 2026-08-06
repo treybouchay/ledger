@@ -5,3 +5,9 @@ dist
 .env
 .env.*
 !.env.example
+amex-sample.pdf
+td-sample.pdf
+*-statement.pdf
+*.traineddata
+tmp-*.png
+tmp-*.jpg

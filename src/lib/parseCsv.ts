@@ -1,5 +1,5 @@
 import type { AccountId, CategorizationRule, CategoryId } from '../types'
-import { CATEGORIZATION_RULES } from '../data/seed'
+import { allCategorizationRules } from './learnedRules'
 
 export interface ParsedCsvRow {
   date: string
@@ -13,7 +13,7 @@ export interface ParsedCsvRow {
 
 export function suggestCategory(
   merchant: string,
-  rules: CategorizationRule[] = CATEGORIZATION_RULES,
+  rules: CategorizationRule[] = allCategorizationRules(),
 ): CategoryId {
   const hay = merchant.toLowerCase()
   for (const rule of rules) {
@@ -104,9 +104,26 @@ function isLikelyAmount(v: string): boolean {
 }
 
 function normalizeDate(raw: string): string {
-  const d = new Date(raw)
-  if (!Number.isNaN(d.getTime())) {
-    return d.toISOString().slice(0, 10)
+  const trimmed = raw.trim()
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10)
+
+  const mdy = trimmed.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/)
+  if (mdy) {
+    const mm = Number(mdy[1])
+    const dd = Number(mdy[2])
+    const yyyy = Number(mdy[3])
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
+    }
   }
-  return raw
+
+  const d = new Date(trimmed)
+  if (!Number.isNaN(d.getTime())) {
+    // Local Y-M-D — avoid UTC shift from toISOString().
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  return trimmed
 }
