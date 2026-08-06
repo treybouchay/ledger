@@ -402,7 +402,7 @@ select {
 }
 
 .hero-hello {
-  margin-bottom: 1.65rem;
+  margin-bottom: 24px;
   gap: 0.35rem;
 }
 
@@ -648,6 +648,25 @@ select {
   letter-spacing: 0.02em;
   color: var(--ink-muted);
   text-transform: uppercase;
+}
+
+.where-it-went-link {
+  justify-self: start;
+  margin-top: 0.15rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--accent, #2f5d50);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.where-it-went-link:hover {
+  color: var(--ink);
 }
 
 .recent-charge-list {

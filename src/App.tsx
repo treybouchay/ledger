@@ -1402,9 +1402,13 @@ export default function App() {
     })
   }
 
-  function viewCategoryInTransactions(categoryId: CategoryId) {
+  function viewCategoryInTransactions(
+    categoryId: CategoryId,
+    person: PersonId | 'all' = categoryPerson,
+  ) {
     setTransactionCategoryFilter(categoryId)
-    setPersonFilter(categoryPerson)
+    setPersonFilter(person)
+    setViewingImportId(null)
     setTab('transactions')
   }
 
@@ -1579,26 +1583,16 @@ export default function App() {
         </button>
       </nav>
       <div className="app">
-      {activeSide === 'budgeting' ? (
-        <header className="hero hero-hello">
-          <h1 className="brand brand-hello">
-            Hello{' '}
-            {personFilter === 'all'
-              ? PEOPLE.map((p) => p.name).join(' & ')
-              : (PEOPLE.find((p) => p.id === personFilter)?.name ?? 'there')}{' '}
-            <span aria-hidden>☀️</span>
-          </h1>
-          <p className="hello-saying">{financialSayingForToday()}</p>
-        </header>
-      ) : (
-        <header className="hero">
-          <h1 className="brand">Household Ledger</h1>
-          <p className="lede">
-            Track leftover from your sheet budgets, plus charges from
-            statements and logging.
-          </p>
-        </header>
-      )}
+      <header className="hero hero-hello">
+        <h1 className="brand brand-hello">
+          Hello{' '}
+          {personFilter === 'all'
+            ? PEOPLE.map((p) => p.name).join(' & ')
+            : (PEOPLE.find((p) => p.id === personFilter)?.name ?? 'there')}{' '}
+          <span aria-hidden>☀️</span>
+        </h1>
+        <p className="hello-saying">{financialSayingForToday()}</p>
+      </header>
 
       {statementUndo ? (
         <div className="statement-undo-toast" role="status">
@@ -2193,6 +2187,18 @@ export default function App() {
                                 charges={categoryTx.slice(0, 12)}
                                 showPerson={personFilter === 'all'}
                               />
+                              <button
+                                type="button"
+                                className="text-link where-it-went-link"
+                                onClick={() =>
+                                  viewCategoryInTransactions(
+                                    row.categoryId,
+                                    personFilter,
+                                  )
+                                }
+                              >
+                                Open in Transactions
+                              </button>
                             </div>
                           ) : (
                             <p className="empty-note tight">
