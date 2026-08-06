@@ -42,7 +42,7 @@ This app is a static Vite build (`dist/`). Data lives in the browser’s `localS
 There is no remote yet. Create a private GitHub repo, then:
 
 ```bash
-git remote add origin git@github.com:YOUR_USER/household-ledger.git
+git remote add origin git@github.com:treybouchay/ledger.git
 git push -u origin main
 ```
 

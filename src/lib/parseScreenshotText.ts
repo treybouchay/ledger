@@ -71,10 +71,55 @@ function suggestScreenshotAccount(text: string): AccountId {
 /** Store / location codes on TD & Amex (“#84958”) — strip before reading amounts. */
 const STORE_NUM = /#\s*\d{3,}\b/g
 
+/** True when this line is only the Amex/TD “Pending” status badge. */
+function isPendingStatusOnly(line: string): boolean {
+  return /^pending\.?$/i.test(line.replace(/\s+/g, ' ').trim())
+}
+
+/**
+ * Pending charges sit under the amount (or on the same row). Skip them —
+ * they are not posted yet and often OCR worse than settled rows.
+ */
+function chargeLooksPending(lines: string[], amountIndex: number): boolean {
+  const line = lines[amountIndex] ?? ''
+  if (/\bpending\b/i.test(line)) return true
+  for (const j of [amountIndex + 1, amountIndex - 1, amountIndex + 2]) {
+    if (j < 0 || j >= lines.length) continue
+    if (isPendingStatusOnly(lines[j])) return true
+  }
+  return false
+}
+
+/**
+ * OCR often reads `$` as `5` (`$16.77` → `516.77`, `$2.00` → `52.00`).
+ * Only rewrite bare amounts (no `$` on the token); keep real `$52` / `$516`.
+ */
+export function stripDollarMisreadAsFive(
+  amountStr: string,
+  hadExplicitDollar: boolean,
+): string {
+  if (hadExplicitDollar) return amountStr
+  const raw = amountStr.replace(/,/g, '').trim()
+  // $16.77 → 516.77 (three digits before the decimal)
+  if (/^5\d{2}\.\d{2}$/.test(raw)) {
+    const rest = raw.slice(1)
+    const n = Number(rest)
+    if (n >= 1 && n < 100) return rest
+  }
+  // $2.00 → 52.00 (single-digit dollars only — avoids nuking real $52)
+  if (/^5\d\.\d{2}$/.test(raw)) {
+    const rest = raw.slice(1)
+    const n = Number(rest)
+    if (n > 0 && n < 10) return rest
+  }
+  return amountStr
+}
+
 /**
  * Fix Amex OCR: area-code digit merges into the dollar amount
  * (`403-262-4255 $337.31` → `$37.31`).
  * Also fix store-# merges (`#84958 $4.80` OCR’d as `$54.80`).
+ * Also fix `$` misread as `5` (`516.77` → `16.77`).
  */
 export function scrubPhoneAmountOcr(text: string): string {
   const lines = text.replace(/\u00a0/g, ' ').split(/\r?\n/)
@@ -90,6 +135,20 @@ export function scrubPhoneAmountOcr(text: string): string {
 
 function repairAmountsOnLine(line: string, context: string): string {
   let next = line
+
+  // OCR `$` → `S` then digits: S16.77 → $16.77
+  next = next.replace(/(^|[\s])S(\d{1,3}\.\d{2})\b/g, '$1$$$2')
+
+  // Bare amount with leading 5 from `$` (`516.77` / `52.00`) when line has no $.
+  if (!/\$/.test(next)) {
+    next = next.replace(
+      /(^|[^\d.])(5\d{1,2}\.\d{2})\b/g,
+      (full, lead: string, amount: string) => {
+        const fixed = stripDollarMisreadAsFive(amount, false)
+        return fixed === amount ? full : `${lead}${fixed}`
+      },
+    )
+  }
 
   // Glued store# + amount: #849584.80 → #84958 4.80
   next = next.replace(/(#\s*\d{3,})(\d\.\d{1,2})\b/g, '$1 $2')
@@ -201,10 +260,19 @@ function isPlausibleMerchant(merchant: string): boolean {
 
 function amountsOnLine(line: string): number[] {
   const cleaned = stripStoreNumbers(stripPhones(line))
-  const found = [
+  const dollar = [
     ...cleaned.matchAll(/\$\s*(\d{1,3}(?:,\d{3})*\.\d{1,2})\b/g),
-    ...cleaned.matchAll(AMOUNT_PATTERN),
-  ].map((m) => Number(Number(m[1].replace(/[$,\s]/g, '')).toFixed(2)))
+  ].map((m) => {
+    const raw = m[1].replace(/,/g, '')
+    return Number(Number(raw).toFixed(2))
+  })
+  const bare = [...cleaned.matchAll(AMOUNT_PATTERN)]
+    .filter((m) => !m[0].includes('$'))
+    .map((m) => {
+      const raw = stripDollarMisreadAsFive(m[1].replace(/[$,\s]/g, ''), false)
+      return Number(Number(raw).toFixed(2))
+    })
+  const found = dollar.length > 0 ? dollar : bare
   return [...new Set(found.filter((n) => n !== 0 && Math.abs(n) < 50000))]
 }
 
@@ -232,6 +300,14 @@ function amountFromLine(line: string, context: string): number | null {
   const any = amountsOnLine(line)
   let amount = pickStatementAmount(dollar.length > 0 ? dollar : any)
   if (!amount) return null
+
+  // Bare OCR amount: `$` often becomes a leading `5`.
+  if (dollar.length === 0) {
+    const fixed = stripDollarMisreadAsFive(Math.abs(amount).toFixed(2), false)
+    if (fixed !== Math.abs(amount).toFixed(2)) {
+      amount = amount < 0 ? -Number(fixed) : Number(fixed)
+    }
+  }
 
   // Repair store-# contamination using digits still visible on the raw line.
   const store = line.match(/#\s*(\d{3,})\b/)
@@ -294,7 +370,7 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]
     if (SKIP_LINE.test(line)) continue
-    if (/^pending\b/i.test(line)) continue
+    if (isPendingStatusOnly(line)) continue
     if (/page\s+\d+/i.test(line)) continue
 
     if (isDateOnlyLine(line)) {
@@ -312,6 +388,12 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
       if (isPlausibleMerchant(merchantOnLine)) {
         pendingMerchant = merchantOnLine
       }
+      continue
+    }
+
+    // Do not import Pending auth holds — only posted activity.
+    if (chargeLooksPending(lines, i)) {
+      pendingMerchant = null
       continue
     }
 
@@ -360,7 +442,7 @@ function findMerchantAbove(lines: string[], index: number): string | null {
   for (let j = index - 1; j >= Math.max(0, index - 4); j -= 1) {
     const prev = lines[j]
     if (isDateOnlyLine(prev)) break
-    if (SKIP_LINE.test(prev) || /^pending\b/i.test(prev)) break
+    if (SKIP_LINE.test(prev) || isPendingStatusOnly(prev)) break
     if (lineHasAmount(prev)) break
     const m = stripToMerchant(prev)
     if (isPlausibleMerchant(m)) return m

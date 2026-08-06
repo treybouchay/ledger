@@ -96,7 +96,7 @@ export async function parseStatementFile(
       warning:
         rows.length === 0
           ? 'OCR ran but found no transactions. Crop to the activity list and try again, or use a PDF/CSV statement.'
-          : `OCR’d ${rows.length} charge${rows.length === 1 ? '' : 's'} from screenshot — review every row (amounts and dates can misread).`,
+          : `OCR’d ${rows.length} posted charge${rows.length === 1 ? '' : 's'} from screenshot (Pending rows skipped) — review every amount and date.`,
       ...ownerMeta(text, file.name, rows),
     }
   }

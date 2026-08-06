@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Household Ledger">
+  <rect width="32" height="32" rx="8" fill="#1c2a24"/>
+  <!-- open ledger -->
+  <rect x="6.5" y="6" width="19" height="20" rx="2" fill="#f4faf7"/>
+  <path d="M16 6.5v19" stroke="#2f5d50" stroke-width="1.25"/>
+  <!-- ruled lines -->
+  <path
+    d="M9 11.25h5.25M9 14.75h5.25M9 18.25h5.25M17.75 11.25H23M17.75 14.75H23M17.75 18.25H23"
+    stroke="#8fb59f"
+    stroke-width="1.35"
+    stroke-linecap="round"
+  />
+  <!-- spine accent -->
+  <rect x="14.85" y="6" width="2.3" height="20" fill="#2f5d50" opacity="0.18"/>
+</svg>
