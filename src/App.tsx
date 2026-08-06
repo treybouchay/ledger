@@ -51,6 +51,7 @@ import {
   upsertBudget,
 } from './lib/customCategories'
 import {
+  accountsForPerson,
   getAllAccounts,
   getCustomAccounts,
   removeCustomAccountData,
@@ -58,6 +59,7 @@ import {
 import {
   accountIcon,
   accountLabel,
+  accountOptionLabel,
   categoryLabel,
   categoryOptionLabel,
 } from './lib/labels'
@@ -202,6 +204,9 @@ export default function App() {
     useState<CategoryId | null>(null)
   const [whereItWentCategoryId, setWhereItWentCategoryId] =
     useState<CategoryId | null>(null)
+  const [expandedAccountId, setExpandedAccountId] = useState<string | null>(
+    null,
+  )
   const [transactionCategoryFilter, setTransactionCategoryFilter] = useState<
     CategoryId | 'all'
   >('all')
@@ -578,6 +583,21 @@ export default function App() {
       ...r,
       share: total > 0 ? Math.round((r.spent / total) * 1000) / 10 : 0,
     }))
+  }, [monthTransactions, personFilter, customCategories, customBudgetTick])
+
+  const recentVariableCharges = useMemo(() => {
+    const variableIds = new Set(
+      getAllCategories()
+        .filter((c) => c.kind === 'variable')
+        .map((c) => c.id),
+    )
+    return sortTransactionsMostRecent(
+      monthTransactions.filter(
+        (t) =>
+          variableIds.has(t.categoryId) &&
+          (personFilter === 'all' || t.personId === personFilter),
+      ),
+    ).slice(0, 5)
   }, [monthTransactions, personFilter, customCategories, customBudgetTick])
 
   const linkableTransactions = useMemo(() => {
@@ -1360,6 +1380,28 @@ export default function App() {
     if (tx.monthId) setMonthId(tx.monthId)
   }
 
+  function reassignStatementAccount(
+    importId: string,
+    accountId: Transaction['accountId'],
+  ) {
+    setTransactions((prev) => {
+      const next = prev.map((t) =>
+        t.importId === importId ? { ...t, accountId } : t,
+      )
+      saveTransactions(next)
+      return next
+    })
+    setImports((prev) => {
+      const next = prev.map((item) =>
+        item.id === importId
+          ? { ...item, primaryAccountId: accountId }
+          : item,
+      )
+      saveImports(next)
+      return next
+    })
+  }
+
   function viewCategoryInTransactions(categoryId: CategoryId) {
     setTransactionCategoryFilter(categoryId)
     setPersonFilter(categoryPerson)
@@ -1537,13 +1579,26 @@ export default function App() {
         </button>
       </nav>
       <div className="app">
-      <header className="hero">
-        <h1 className="brand">Household Ledger</h1>
-        <p className="lede">
-          Track leftover from your sheet budgets, plus charges from statements
-          and logging.
-        </p>
-      </header>
+      {activeSide === 'budgeting' ? (
+        <header className="hero hero-hello">
+          <h1 className="brand brand-hello">
+            Hello{' '}
+            {personFilter === 'all'
+              ? PEOPLE.map((p) => p.name).join(' & ')
+              : (PEOPLE.find((p) => p.id === personFilter)?.name ?? 'there')}{' '}
+            <span aria-hidden>☀️</span>
+          </h1>
+          <p className="hello-saying">{financialSayingForToday()}</p>
+        </header>
+      ) : (
+        <header className="hero">
+          <h1 className="brand">Household Ledger</h1>
+          <p className="lede">
+            Track leftover from your sheet budgets, plus charges from
+            statements and logging.
+          </p>
+        </header>
+      )}
 
       {statementUndo ? (
         <div className="statement-undo-toast" role="status">
@@ -1916,6 +1971,12 @@ export default function App() {
                     used={insightVariableSpent}
                     total={insightVariableBudget}
                   />
+                  {recentVariableCharges.length > 0 ? (
+                    <div className="insight-recent">
+                      <span className="stat-label">Most recent</span>
+                      <RecentChargeList charges={recentVariableCharges} />
+                    </div>
+                  ) : null}
                 </div>
                 <div className="insight-card">
                   <div className="insight-card-top">
@@ -2050,27 +2111,6 @@ export default function App() {
             </div>
           </div>
 
-          {monthEndLines.length === 3 ? (
-            <MonthEndSummary
-              lines={monthEndLines}
-              personFilter={personFilter}
-              chartReady={!showBootLoader}
-              personLeftoverVariable={
-                overviewInsight ? insightStillAvailable : null
-              }
-              personOnTrack={
-                overviewInsight
-                  ? onTrackToSave(overviewInsight)
-                  : null
-              }
-              personLabel={
-                personFilter === 'all'
-                  ? null
-                  : (PEOPLE.find((p) => p.id === personFilter)?.name ?? null)
-              }
-            />
-          ) : null}
-
           {householdCategorySpend.length > 0 ? (
             <section className="panel insight-section">
               <div className="panel-header">
@@ -2086,15 +2126,14 @@ export default function App() {
                 {householdCategorySpend.slice(0, 8).map((row) => {
                   const expanded = row.categoryId === whereItWentCategoryId
                   const categoryTx = expanded
-                    ? monthTransactions.filter(
-                        (t) =>
-                          t.categoryId === row.categoryId &&
-                          (personFilter === 'all' ||
-                            t.personId === personFilter),
+                    ? sortTransactionsMostRecent(
+                        monthTransactions.filter(
+                          (t) =>
+                            t.categoryId === row.categoryId &&
+                            (personFilter === 'all' ||
+                              t.personId === personFilter),
+                        ),
                       )
-                    : []
-                  const merchantRows = expanded
-                    ? rollupMerchants(categoryTx)
                     : []
                   return (
                     <li
@@ -2145,57 +2184,19 @@ export default function App() {
                       </button>
                       {expanded ? (
                         <div className="share-list-detail">
-                          {merchantRows.length > 0 ? (
-                            <div className="merchant-breakdown">
-                              <div className="merchant-breakdown-heading">
-                                <span className="category-line-icon" aria-hidden>
-                                  <IconMerchant />
-                                </span>
-                                <h4>Top merchants</h4>
-                              </div>
-                              <ol className="merchant-rank-list">
-                                {merchantRows.slice(0, 8).map((m, index) => {
-                                  const barPct = Math.min(
-                                    Math.max(m.share, 0),
-                                    100,
-                                  )
-                                  return (
-                                    <li key={m.merchant}>
-                                      <span
-                                        className="merchant-rank"
-                                        aria-hidden
-                                      >
-                                        {index + 1}
-                                      </span>
-                                      <div className="merchant-rank-main">
-                                        <span className="merchant-rank-name">
-                                          {m.merchant}
-                                        </span>
-                                        <span className="merchant-rank-meta">
-                                          {m.share > 0 ? `${m.share}% · ` : ''}
-                                          {m.transactionCount} tx
-                                          {m.refunds > 0
-                                            ? ` · refunds ${formatMoney(m.refunds)}`
-                                            : ''}
-                                        </span>
-                                      </div>
-                                      <div
-                                        className="merchant-rank-bar"
-                                        aria-hidden
-                                      >
-                                        <span style={{ width: `${barPct}%` }} />
-                                      </div>
-                                      <span className="cash-delta out merchant-rank-amount">
-                                        −{formatMoney(m.spent)}
-                                      </span>
-                                    </li>
-                                  )
-                                })}
-                              </ol>
+                          {categoryTx.length > 0 ? (
+                            <div className="recent-charge-block">
+                              <h4 className="recent-charge-heading">
+                                Charges · most recent
+                              </h4>
+                              <RecentChargeList
+                                charges={categoryTx.slice(0, 12)}
+                                showPerson={personFilter === 'all'}
+                              />
                             </div>
                           ) : (
                             <p className="empty-note tight">
-                              No merchants in this category yet.
+                              No charges in this category yet.
                             </p>
                           )}
                         </div>
@@ -2205,6 +2206,27 @@ export default function App() {
                 })}
               </ul>
             </section>
+          ) : null}
+
+          {monthEndLines.length === 3 ? (
+            <MonthEndSummary
+              lines={monthEndLines}
+              personFilter={personFilter}
+              chartReady={!showBootLoader}
+              personLeftoverVariable={
+                overviewInsight ? insightStillAvailable : null
+              }
+              personOnTrack={
+                overviewInsight
+                  ? onTrackToSave(overviewInsight)
+                  : null
+              }
+              personLabel={
+                personFilter === 'all'
+                  ? null
+                  : (PEOPLE.find((p) => p.id === personFilter)?.name ?? null)
+              }
+            />
           ) : null}
 
           <OverviewSection
@@ -2344,38 +2366,91 @@ export default function App() {
               </div>
             ) : (
               <ul className="account-spend-list">
-                {accountRows.map((row) => (
-                  <li key={row.accountId} className="account-spend-row">
-                    <div className="account-spend-top">
-                      <span className="account-spend-name">
-                        <span className="icon" aria-hidden>
-                          {row.icon}
-                        </span>{' '}
-                        {row.label}
-                      </span>
-                      <strong className="num">
-                        {formatMoney(row.netSpend)}
-                      </strong>
-                    </div>
-                    <div className="share-cell">
-                      <div className="share-bar" aria-hidden>
+                {accountRows.map((row) => {
+                  const expanded = expandedAccountId === row.accountId
+                  const accountCharges = expanded
+                    ? sortTransactionsMostRecent(
+                        monthTransactions.filter(
+                          (t) =>
+                            t.accountId === row.accountId &&
+                            (personFilter === 'all' ||
+                              t.personId === personFilter),
+                        ),
+                      )
+                    : []
+                  return (
+                    <li
+                      key={row.accountId}
+                      className={`account-spend-row${expanded ? ' selected' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        className="account-spend-toggle"
+                        aria-expanded={expanded}
+                        onClick={() =>
+                          setExpandedAccountId(
+                            expanded ? null : row.accountId,
+                          )
+                        }
+                      >
                         <span
-                          style={{ width: `${Math.min(row.share, 100)}%` }}
-                        />
-                      </div>
-                      <span className="share-pct">
-                        {row.share > 0 ? `${row.share}%` : '—'}
-                      </span>
-                    </div>
-                    <p className="account-spend-meta">
-                      {row.transactionCount} charge
-                      {row.transactionCount === 1 ? '' : 's'}
-                      {row.refunds > 0
-                        ? ` · refunds ${formatMoney(row.refunds)}`
-                        : ''}
-                    </p>
-                  </li>
-                ))}
+                          className={`expand-chevron${expanded ? ' open' : ''}`}
+                          aria-hidden
+                        >
+                          ›
+                        </span>
+                        <div className="account-spend-body">
+                          <div className="account-spend-top">
+                            <span className="account-spend-name">
+                              <span className="icon" aria-hidden>
+                                {row.icon}
+                              </span>{' '}
+                              {row.label}
+                            </span>
+                            <strong className="num">
+                              {formatMoney(row.netSpend)}
+                            </strong>
+                          </div>
+                          <div className="share-cell">
+                            <div className="share-bar" aria-hidden>
+                              <span
+                                style={{
+                                  width: `${Math.min(row.share, 100)}%`,
+                                }}
+                              />
+                            </div>
+                            <span className="share-pct">
+                              {row.share > 0 ? `${row.share}%` : '—'}
+                            </span>
+                          </div>
+                          <p className="account-spend-meta">
+                            {row.transactionCount} charge
+                            {row.transactionCount === 1 ? '' : 's'}
+                            {row.refunds > 0
+                              ? ` · refunds ${formatMoney(row.refunds)}`
+                              : ''}
+                            {' · '}
+                            {expanded ? 'Hide' : 'Most recent'}
+                          </p>
+                        </div>
+                      </button>
+                      {expanded ? (
+                        <div className="account-spend-detail">
+                          {accountCharges.length > 0 ? (
+                            <RecentChargeList
+                              charges={accountCharges.slice(0, 15)}
+                              showPerson={personFilter === 'all'}
+                            />
+                          ) : (
+                            <p className="empty-note tight">
+                              No charges for this account this month.
+                            </p>
+                          )}
+                        </div>
+                      ) : null}
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </OverviewSection>
@@ -2747,11 +2822,6 @@ export default function App() {
                     {PEOPLE.find((p) => p.id === viewingImport.personId)?.name ??
                       viewingImport.personId}
                     {' · '}
-                    <span className="icon" aria-hidden>
-                      {accountIcon(viewingImport.primaryAccountId)}
-                    </span>{' '}
-                    {accountLabel(viewingImport.primaryAccountId)}
-                    {' · '}
                     {statementTransactions.length} charge
                     {statementTransactions.length === 1 ? '' : 's'}
                     {' · '}
@@ -2768,6 +2838,38 @@ export default function App() {
                   </p>
                 </div>
                 <div className="import-actions">
+                  <label className="statement-account-field">
+                    Account
+                    <select
+                      value={viewingImport.primaryAccountId}
+                      onChange={(e) =>
+                        reassignStatementAccount(
+                          viewingImport.id,
+                          e.target.value as Transaction['accountId'],
+                        )
+                      }
+                      aria-label="Account for these charges"
+                    >
+                      {(() => {
+                        const forPerson = accountsForPerson(
+                          viewingImport.personId,
+                        )
+                        const ids = new Set(forPerson.map((a) => a.id))
+                        const options = [...forPerson]
+                        if (!ids.has(viewingImport.primaryAccountId)) {
+                          const orphan = getAllAccounts().find(
+                            (a) => a.id === viewingImport.primaryAccountId,
+                          )
+                          if (orphan) options.unshift(orphan)
+                        }
+                        return options.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {accountOptionLabel(a.id)}
+                          </option>
+                        ))
+                      })()}
+                    </select>
+                  </label>
                   <button
                     type="button"
                     className="ghost"
@@ -3999,6 +4101,76 @@ function OverviewSection({
         </div>
       ) : null}
     </section>
+  )
+}
+
+const FINANCIAL_SAYINGS = [
+  'Small steps today become big savings tomorrow.',
+  'A budget is telling your money where to go.',
+  'Spend with intention — keep what matters.',
+  'Track a little, stress a little less.',
+  'Every charge has a story — make yours count.',
+  'Wealth grows quietly when you watch the details.',
+  'Know where it went, and what’s left feels clearer.',
+  'Pay yourself first, then enjoy the rest.',
+] as const
+
+function financialSayingForToday(now = new Date()): string {
+  const start = new Date(now.getFullYear(), 0, 0)
+  const dayOfYear = Math.floor(
+    (now.getTime() - start.getTime()) / 86_400_000,
+  )
+  return FINANCIAL_SAYINGS[dayOfYear % FINANCIAL_SAYINGS.length]
+}
+
+function sortTransactionsMostRecent(transactions: Transaction[]): Transaction[] {
+  return [...transactions].sort(
+    (a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id),
+  )
+}
+
+function formatChargeDate(iso: string): string {
+  const raw = iso?.slice(0, 10) || ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return iso || '—'
+  const d = new Date(`${raw}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return raw
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function RecentChargeList({
+  charges,
+  showPerson = false,
+}: {
+  charges: Transaction[]
+  showPerson?: boolean
+}) {
+  if (charges.length === 0) return null
+  return (
+    <ul className="recent-charge-list">
+      {charges.map((t) => {
+        const personName = PEOPLE.find((p) => p.id === t.personId)?.name
+        return (
+          <li key={t.id}>
+            <time dateTime={t.date.slice(0, 10)}>{formatChargeDate(t.date)}</time>
+            <span className="recent-charge-merchant">
+              {t.merchant}
+              {showPerson && personName ? (
+                <span className="recent-charge-person"> · {personName}</span>
+              ) : null}
+              {t.isRefund ? (
+                <span className="cash-type in"> Refund</span>
+              ) : null}
+            </span>
+            <span
+              className={`recent-charge-amount ${t.isRefund ? 'in' : 'out'}`}
+            >
+              {t.isRefund ? '+' : '−'}
+              {formatMoney(t.amount)}
+            </span>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

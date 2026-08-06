@@ -79,14 +79,29 @@ function isPendingStatusOnly(line: string): boolean {
 /**
  * Pending charges sit under the amount (or on the same row). Skip them —
  * they are not posted yet and often OCR worse than settled rows.
+ *
+ * Look forward for a Pending badge, and only look one line back when that
+ * Pending sits between a merchant name and this amount — never steal the
+ * previous charge’s Pending (that was skipping SidelineSwap after McDonalds).
  */
 function chargeLooksPending(lines: string[], amountIndex: number): boolean {
   const line = lines[amountIndex] ?? ''
   if (/\bpending\b/i.test(line)) return true
-  for (const j of [amountIndex + 1, amountIndex - 1, amountIndex + 2]) {
-    if (j < 0 || j >= lines.length) continue
-    if (isPendingStatusOnly(lines[j])) return true
+
+  for (let j = amountIndex + 1; j < Math.min(lines.length, amountIndex + 3); j += 1) {
+    const next = lines[j]
+    if (isPendingStatusOnly(next)) return true
+    if (isDateOnlyLine(next) || lineHasAmount(next)) break
+    if (isPlausibleMerchant(stripToMerchant(next))) break
   }
+
+  if (amountIndex > 0 && isPendingStatusOnly(lines[amountIndex - 1])) {
+    const above = amountIndex >= 2 ? lines[amountIndex - 2] : ''
+    // Previous charge ended with amount then Pending — not this row.
+    if (above && lineHasAmount(above)) return false
+    return true
+  }
+
   return false
 }
 
