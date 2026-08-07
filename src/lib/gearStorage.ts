@@ -3,11 +3,12 @@ import {
   GEAR_MONTHS_SEED,
   GEAR_OPENING_BALANCE,
 } from '../data/gearSeed'
-import { gearTagsEqual } from './gearTags'
+import { GEAR_KINDS, gearTagsEqual, kindLabel } from './gearTags'
 import type {
   GearCashMove,
   GearItemTags,
   GearKeepItem,
+  GearKind,
   GearListingStatus,
   GearMonth,
   GearProjectedManualRow,
@@ -214,6 +215,86 @@ export function isEligibleProjectedAttachBuy(
   if (keptBuyIds(keepList).has(move.id)) return false
   if (cashGroupOpposites(moves, move).length > 0) return false
   return true
+}
+
+/**
+ * Open flip inventory on hand: unsold buys not on the keep list
+ * (listed and not-listed). Same eligibility as projected “Add from buys”.
+ */
+export function openInventoryBuys(
+  moves: GearCashMove[],
+  keepList: readonly GearKeepItem[],
+): GearCashMove[] {
+  return sortCashMoves(
+    moves.filter((m) => isEligibleProjectedAttachBuy(m, moves, keepList)),
+  )
+}
+
+export type OpenInventoryKindCount = {
+  kind: GearKind
+  label: string
+  count: number
+}
+
+export type OpenInventoryProjectedSummary = {
+  total: number
+  byKind: OpenInventoryKindCount[]
+  /** Sum of projectedTargets for open buys that have a target. */
+  projectedCash: number
+  /** Open buys that have a finite projected target. */
+  pricedCount: number
+}
+
+/**
+ * Stock counts by GearKind plus gross projected proceeds if open
+ * inventory sells at projectedTargets (cash buy id → target sold).
+ */
+export function openInventoryProjectedSummary(
+  moves: GearCashMove[],
+  keepList: readonly GearKeepItem[],
+  projectedTargets: Record<string, number | null> | undefined,
+): OpenInventoryProjectedSummary {
+  const open = openInventoryBuys(moves, keepList)
+  const counts = new Map<GearKind, number>()
+  let projectedCash = 0
+  let pricedCount = 0
+  const targets = projectedTargets ?? {}
+
+  for (const buy of open) {
+    const kind: GearKind =
+      buy.tags?.kind && GEAR_KINDS.some((k) => k.id === buy.tags?.kind)
+        ? buy.tags.kind
+        : 'other'
+    counts.set(kind, (counts.get(kind) ?? 0) + 1)
+    const t = targets[buy.id]
+    if (t != null && Number.isFinite(t)) {
+      pricedCount += 1
+      projectedCash += t
+    }
+  }
+
+  const byKind: OpenInventoryKindCount[] = []
+  for (const { id, label } of GEAR_KINDS) {
+    const count = counts.get(id) ?? 0
+    if (count > 0) byKind.push({ kind: id, label, count })
+  }
+  // Unknown kind ids (shouldn’t happen) — surface under Other.
+  for (const [kind, count] of counts) {
+    if (count > 0 && !byKind.some((b) => b.kind === kind)) {
+      byKind.push({
+        kind,
+        label: kindLabel(kind) || 'Other',
+        count,
+      })
+    }
+  }
+
+  return {
+    total: open.length,
+    byKind,
+    projectedCash: Math.round(projectedCash * 100) / 100,
+    pricedCount,
+  }
 }
 
 /**
@@ -514,6 +595,76 @@ export function cashGroupEconomics(
   }
 }
 
+export interface RealizedFlipProfitMonth {
+  /** Sum of (sell proceeds − linked buy cost) for groups sold this month. */
+  profit: number
+  sold: number
+  purchased: number
+  /** Linked groups attributed to this month. */
+  groupCount: number
+  /** Sell rows in this month that belong to those groups. */
+  sellCount: number
+}
+
+/**
+ * Realized gear-flip profit for a calendar month (YYYY-MM).
+ * Uses gear cash link economics only — not household Transaction cash-ins.
+ * Unlinked sells are omitted (no inventing cost). Multi-month flips: full
+ * group profit is attributed when any sell date falls in `monthId` (deduped
+ * by linkGroupId so a group is counted once per month view).
+ */
+export function realizedFlipProfitForMonth(
+  cash: GearCashMove[],
+  monthId: string,
+): RealizedFlipProfitMonth {
+  const empty: RealizedFlipProfitMonth = {
+    profit: 0,
+    sold: 0,
+    purchased: 0,
+    groupCount: 0,
+    sellCount: 0,
+  }
+  if (!/^\d{4}-\d{2}$/.test(monthId)) return empty
+
+  const sellsInMonth = cash.filter(
+    (m) =>
+      m.direction === 'in' &&
+      Boolean(m.linkGroupId) &&
+      (m.date?.trim().slice(0, 7) ?? '') === monthId,
+  )
+  if (sellsInMonth.length === 0) return empty
+
+  const seen = new Set<string>()
+  let profit = 0
+  let sold = 0
+  let purchased = 0
+  let groupCount = 0
+  let sellCount = 0
+
+  for (const sell of sellsInMonth) {
+    const groupId = sell.linkGroupId
+    if (!groupId || seen.has(groupId)) continue
+    seen.add(groupId)
+    const stats = cashGroupEconomics(cash, sell)
+    if (!stats) continue
+    groupCount += 1
+    sellCount += stats.sells.filter(
+      (s) => (s.date?.trim().slice(0, 7) ?? '') === monthId,
+    ).length
+    profit += stats.profit
+    sold += stats.sold
+    purchased += stats.purchased
+  }
+
+  return {
+    profit: Math.round(profit * 100) / 100,
+    sold: Math.round(sold * 100) / 100,
+    purchased: Math.round(purchased * 100) / 100,
+    groupCount,
+    sellCount,
+  }
+}
+
 export function normalizeCashItem(item?: string | null): string {
   return (item ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
@@ -634,6 +785,8 @@ export type SellItemSuggestion = {
   remaining: number
   /** Structured tags from a matching buy, when available. */
   tags?: GearItemTags | null
+  /** Preferred buy row to link when logging this sell. */
+  buyId?: string | null
 }
 
 /**
@@ -651,6 +804,7 @@ export function suggestSellItemNames(
     remaining: number
     priority: number
     tags?: GearItemTags | null
+    buyId?: string | null
   }
   const byKey = new Map<string, Acc>()
   const excluded =
@@ -663,13 +817,14 @@ export function suggestSellItemNames(
     remaining: number,
     priority: number,
     tags?: GearItemTags | null,
+    buyId?: string | null,
   ) {
     const key = normalizeCashItem(label)
     const trimmed = label.trim()
     if (!key || !trimmed || remaining <= 0) return
     const prev = byKey.get(key)
     if (!prev) {
-      byKey.set(key, { label: trimmed, remaining, priority, tags })
+      byKey.set(key, { label: trimmed, remaining, priority, tags, buyId })
       return
     }
     byKey.set(key, {
@@ -678,6 +833,7 @@ export function suggestSellItemNames(
         Math.round((prev.remaining + remaining) * 100) / 100,
       priority: Math.max(prev.priority, priority),
       tags: prev.tags ?? tags,
+      buyId: prev.buyId ?? buyId ?? null,
     })
   }
 
@@ -686,7 +842,7 @@ export function suggestSellItemNames(
     if (excluded.has(buy.id)) continue
     const label = (buy.item ?? '').trim()
     if (!label) continue
-    bump(label, buy.amount, 2, buy.tags)
+    bump(label, buy.amount, 2, buy.tags, buy.id)
   }
 
   const groups = new Map<string, GearCashMove[]>()
@@ -715,20 +871,31 @@ export function suggestSellItemNames(
     const priority = groupSells.length === 0 ? 2 : 1
     const nameTotals = new Map<
       string,
-      { label: string; amount: number; tags?: GearItemTags | null }
+      {
+        label: string
+        amount: number
+        tags?: GearItemTags | null
+        buyId?: string | null
+      }
     >()
     for (const b of namedBuys) {
       const label = (b.item ?? '').trim()
       const key = normalizeCashItem(label)
       const prev = nameTotals.get(key)
       if (prev) prev.amount = Math.round((prev.amount + b.amount) * 100) / 100
-      else nameTotals.set(key, { label, amount: b.amount, tags: b.tags })
+      else
+        nameTotals.set(key, {
+          label,
+          amount: b.amount,
+          tags: b.tags,
+          buyId: b.id,
+        })
     }
 
-    for (const { label, amount, tags } of nameTotals.values()) {
+    for (const { label, amount, tags, buyId } of nameTotals.values()) {
       const share =
         Math.round(remaining * (amount / namedPurchased) * 100) / 100
-      bump(label, share, priority, tags)
+      bump(label, share, priority, tags, buyId)
     }
   }
 
@@ -739,6 +906,7 @@ export function suggestSellItemNames(
       remaining: v.remaining,
       priority: v.priority,
       tags: v.tags,
+      buyId: v.buyId,
     }))
     .sort(
       (a, b) =>
@@ -746,11 +914,12 @@ export function suggestSellItemNames(
         b.remaining - a.remaining ||
         a.label.localeCompare(b.label),
     )
-    .map(({ key, label, remaining, tags }) => ({
+    .map(({ key, label, remaining, tags, buyId }) => ({
       key,
       label,
       remaining,
       tags: tags ?? null,
+      buyId: buyId ?? null,
     }))
 }
 

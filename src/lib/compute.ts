@@ -31,6 +31,13 @@ function money(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+/** Refund or cash deposit — money in, not spend. */
+export function isMoneyIn(
+  t: Pick<Transaction, 'isRefund' | 'isCashIn'>,
+): boolean {
+  return Boolean(t.isRefund || t.isCashIn)
+}
+
 export function budgetFor(personId: PersonId, categoryId: CategoryId): number {
   return (
     getAllBudgets().find(
@@ -76,7 +83,7 @@ export function spendByKind(
     transactions
       .filter(
         (t) =>
-          t.personId === personId && ids.has(t.categoryId) && !t.isRefund,
+          t.personId === personId && ids.has(t.categoryId) && !isMoneyIn(t),
       )
       .reduce((sum, t) => sum + t.amount, 0),
   )
@@ -93,7 +100,7 @@ export function categorySpend(
         (t) =>
           t.personId === personId &&
           t.categoryId === categoryId &&
-          !t.isRefund,
+          !isMoneyIn(t),
       )
       .reduce((sum, t) => sum + t.amount, 0),
   )
@@ -110,13 +117,24 @@ export function personRefunds(
   )
 }
 
+export function personCashIns(
+  transactions: Transaction[],
+  personId: PersonId,
+): number {
+  return money(
+    transactions
+      .filter((t) => t.personId === personId && t.isCashIn && !t.isRefund)
+      .reduce((sum, t) => sum + t.amount, 0),
+  )
+}
+
 export function personGrossSpend(
   transactions: Transaction[],
   personId: PersonId,
 ): number {
   return money(
     transactions
-      .filter((t) => t.personId === personId && !t.isRefund)
+      .filter((t) => t.personId === personId && !isMoneyIn(t))
       .reduce((sum, t) => sum + t.amount, 0),
   )
 }
@@ -148,6 +166,7 @@ export interface AccountRollup {
   icon: string
   grossSpend: number
   refunds: number
+  cashIns: number
   netSpend: number
   transactionCount: number
   share: number
@@ -172,12 +191,17 @@ export function rollupAccounts(transactions: Transaction[]): AccountRollup[] {
     const rowsForAccount = transactions.filter((t) => t.accountId === account.id)
     const grossSpend = money(
       rowsForAccount
-        .filter((t) => !t.isRefund)
+        .filter((t) => !isMoneyIn(t))
         .reduce((sum, t) => sum + t.amount, 0),
     )
     const refunds = money(
       rowsForAccount
         .filter((t) => t.isRefund)
+        .reduce((sum, t) => sum + t.amount, 0),
+    )
+    const cashIns = money(
+      rowsForAccount
+        .filter((t) => t.isCashIn && !t.isRefund)
         .reduce((sum, t) => sum + t.amount, 0),
     )
     return {
@@ -186,7 +210,8 @@ export function rollupAccounts(transactions: Transaction[]): AccountRollup[] {
       icon: account.icon,
       grossSpend,
       refunds,
-      netSpend: money(grossSpend - refunds),
+      cashIns,
+      netSpend: money(grossSpend - refunds - cashIns),
       transactionCount: rowsForAccount.length,
       share: 0,
     }
@@ -208,6 +233,7 @@ export interface MerchantRollup {
   merchant: string
   spent: number
   refunds: number
+  cashIns: number
   transactionCount: number
   share: number
 }
@@ -216,7 +242,7 @@ export interface MerchantRollup {
 export function rollupMerchants(transactions: Transaction[]): MerchantRollup[] {
   const byMerchant = new Map<
     string,
-    { spent: number; refunds: number; transactionCount: number }
+    { spent: number; refunds: number; cashIns: number; transactionCount: number }
   >()
 
   for (const t of transactions) {
@@ -224,10 +250,13 @@ export function rollupMerchants(transactions: Transaction[]): MerchantRollup[] {
     const current = byMerchant.get(key) ?? {
       spent: 0,
       refunds: 0,
+      cashIns: 0,
       transactionCount: 0,
     }
     if (t.isRefund) {
       current.refunds = money(current.refunds + t.amount)
+    } else if (t.isCashIn) {
+      current.cashIns = money(current.cashIns + t.amount)
     } else {
       current.spent = money(current.spent + t.amount)
     }
@@ -244,6 +273,7 @@ export function rollupMerchants(transactions: Transaction[]): MerchantRollup[] {
       merchant,
       spent: row.spent,
       refunds: row.refunds,
+      cashIns: row.cashIns,
       transactionCount: row.transactionCount,
       share:
         totalSpent > 0 && row.spent > 0
@@ -265,7 +295,8 @@ export function personTotals(
   const income = getPersonIncome(personId)
   const grossSpend = personGrossSpend(transactions, personId)
   const refunds = personRefunds(transactions, personId)
-  const netSpend = money(grossSpend - refunds)
+  const cashIns = personCashIns(transactions, personId)
+  const netSpend = money(grossSpend - refunds - cashIns)
   const categories = rollupCategories(transactions, personId)
   const fixedBudget = budgetByKind(personId, 'fixed')
   const variableBudget = budgetByKind(personId, 'variable')
@@ -282,6 +313,7 @@ export function personTotals(
     income,
     grossSpend,
     refunds,
+    cashIns,
     netSpend,
     fixedBudget,
     variableBudget,

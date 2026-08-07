@@ -12,6 +12,7 @@ export interface ReviewDraftRow {
   accountId: AccountId
   personId: PersonId
   isRefund: boolean
+  isCashIn?: boolean
   included: boolean
   suggestedCategoryId: CategoryId
   matchStatus: MatchStatus
@@ -81,6 +82,7 @@ export function draftsFromParsed(
       accountId,
       personId,
       isRefund,
+      isCashIn: false,
       included,
       suggestedCategoryId: row.suggestedCategoryId,
       matchStatus: match.status,

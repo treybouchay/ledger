@@ -101,7 +101,10 @@ export interface Transaction {
   accountId: AccountId
   categoryId: CategoryId
   notes?: string
+  /** Money returned against a purchase (rebate / return). */
   isRefund?: boolean
+  /** Extra cash deposited / received — not a purchase refund. */
+  isCashIn?: boolean
   source: 'seed' | 'manual' | 'csv'
   /** Groups charges from one statement upload. */
   importId?: string
@@ -113,6 +116,7 @@ export interface MonthPersonTotals {
   income: number
   grossSpend: number
   refunds: number
+  cashIns: number
   netSpend: number
   fixedBudget: number
   variableBudget: number
@@ -211,7 +215,7 @@ export type GearLevel = 'intermediate' | 'senior'
 export interface GearItemTags {
   kind?: GearKind | null
   level?: GearLevel | null
-  /** Pads / full set: 34+2 etc. Gloves/chest/pants/glove set: S–XXL or custom. */
+  /** Pads / full set: 34+2 etc. Chest/pants/glove set: S–XXL or custom. Blocker/catcher: custom only. */
   size?: string | null
   /** Blocker/catcher size on a full set (pads use `size`). */
   gloveSize?: string | null

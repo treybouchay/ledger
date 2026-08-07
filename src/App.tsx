@@ -30,6 +30,7 @@ import {
 } from './lib/backup'
 import {
   formatMoney,
+  isMoneyIn,
   isVariableBudgetOver,
   monthEndSaveLines,
   onTrackToSave,
@@ -98,6 +99,7 @@ import {
 } from './lib/storage'
 import {
   loadGearState,
+  realizedFlipProfitForMonth,
   resetGearState,
   saveGearState,
 } from './lib/gearStorage'
@@ -111,6 +113,7 @@ import {
 import {
   readAppTab,
   writeAppTab,
+  writeGearSubTab,
   BUDGETING_TABS,
   SIDE_NAV_ITEMS,
   defaultTabForSide,
@@ -749,9 +752,19 @@ export default function App() {
     fixedBudget: assumedFixedBills,
     variableSpent: actualVariableSpent,
   })
+  // Gear flip profit is display-only from gear cash economics — not Transaction cash-ins.
+  const monthFlipProfit = realizedFlipProfitForMonth(gear.cash, monthId)
+  const flipProfitPositive = Math.max(0, monthFlipProfit.profit)
+  const showFlipProfit =
+    monthFlipProfit.groupCount > 0 || monthFlipProfit.sellCount > 0
+  // Bar = uses of salary (fixed / variable / leftover) plus a distinct gear-flip
+  // infusion segment. Leftover card stays income − fixed − variable (no flips).
+  // Base expands by positive flip profit so segments still sum to ~100%:
+  //   fixed + variable + max(0, salary leftover) + flipProfit = income + flipProfit
+  //   (when overspent on salary: leftover segment is 0; flips still appear in full).
   const actualAllocBase = Math.max(
-    actualIncome,
-    assumedFixedBills + actualVariableSpent,
+    actualIncome + flipProfitPositive,
+    assumedFixedBills + actualVariableSpent + flipProfitPositive,
     1,
   )
   const actualFixedPct = Math.min(
@@ -762,7 +775,14 @@ export default function App() {
     100,
     (actualVariableSpent / actualAllocBase) * 100,
   )
-  const actualLeftoverPct = Math.max(0, 100 - actualFixedPct - actualVariablePct)
+  const actualFlipPct =
+    flipProfitPositive > 0
+      ? Math.min(100, (flipProfitPositive / actualAllocBase) * 100)
+      : 0
+  const actualLeftoverPct = Math.max(
+    0,
+    100 - actualFixedPct - actualVariablePct - actualFlipPct,
+  )
 
   const monthEndLines = monthEndSaveLines(summary.people)
 
@@ -789,7 +809,8 @@ export default function App() {
       merchant: row.merchant,
       accountId: row.accountId,
       categoryId: row.categoryId,
-      isRefund: row.isRefund,
+      isRefund: row.isRefund ?? false,
+      isCashIn: row.isCashIn ?? false,
       source: 'csv',
       importId,
       sourceFile: meta.fileName,
@@ -814,7 +835,7 @@ export default function App() {
         (a, b) => b[1] - a[1] || b[0].localeCompare(a[0]),
       )[0]?.[0] ?? monthIds[monthIds.length - 1]
     const netAmount = next.reduce(
-      (sum, t) => sum + (t.isRefund ? -t.amount : t.amount),
+      (sum, t) => sum + (isMoneyIn(t) ? -t.amount : t.amount),
       0,
     )
 
@@ -1995,13 +2016,19 @@ export default function App() {
                   : ` · ${insightPersonLabel}`}
                 {' '}
                 <span className="budget-alloc-hint">
-                  (fixed bills assumed paid)
+                  {showFlipProfit && flipProfitPositive > 0
+                    ? '(fixed bills assumed paid · includes gear flip profit)'
+                    : '(fixed bills assumed paid)'}
                 </span>
               </p>
               <div
                 className="budget-alloc-bar"
                 role="img"
-                aria-label={`Fixed bills assumed paid ${formatMoney(assumedFixedBills)}, variable spent ${formatMoney(actualVariableSpent)}, leftover ${formatMoney(actualLeftover)}`}
+                aria-label={`Fixed bills assumed paid ${formatMoney(assumedFixedBills)}, variable spent ${formatMoney(actualVariableSpent)}${
+                  flipProfitPositive > 0
+                    ? `, gear flip profit ${formatMoney(flipProfitPositive)}`
+                    : ''
+                }, leftover ${formatMoney(actualLeftover)}`}
               >
                 {actualFixedPct > 0 ? (
                   <span
@@ -2029,6 +2056,13 @@ export default function App() {
                     className="seg free"
                     style={{ width: `${actualLeftoverPct}%` }}
                     title="Leftover — income left after planned fixed bills and actual variable spend"
+                  />
+                ) : null}
+                {actualFlipPct > 0 ? (
+                  <span
+                    className="seg flip"
+                    style={{ width: `${actualFlipPct}%` }}
+                    title="Cash infusion · gear flip profit (linked sells)"
                   />
                 ) : null}
               </div>
@@ -2064,11 +2098,23 @@ export default function App() {
                     {formatMoney(actualLeftover)}
                   </strong>
                 </li>
+                {flipProfitPositive > 0 ? (
+                  <li>
+                    <span className="swatch flip" aria-hidden />
+                    Gear flips{' '}
+                    <strong className="good">
+                      {formatMoney(flipProfitPositive)}
+                    </strong>
+                  </li>
+                ) : null}
               </ul>
             </div>
           </section>
 
-          <div className="overview-quiet-strip" aria-label="Income context">
+          <div
+            className={`overview-quiet-strip${showFlipProfit ? ' with-flip' : ''}`}
+            aria-label="Income context"
+          >
             <div>
               <span className="stat-label">
                 {personFilter === 'all' ? 'Household income' : `${insightPersonLabel} income`}
@@ -2083,6 +2129,43 @@ export default function App() {
                 <p className="stat-sub">Monthly take-home used in this view</p>
               )}
             </div>
+            {showFlipProfit ? (
+              <div>
+                <span className="stat-label">Cash infusion · Gear flips</span>
+                <strong
+                  className={
+                    monthFlipProfit.profit > 0
+                      ? 'good'
+                      : monthFlipProfit.profit < 0
+                        ? 'bad'
+                        : undefined
+                  }
+                >
+                  {monthFlipProfit.profit > 0 ? '+' : ''}
+                  {formatMoney(monthFlipProfit.profit)}
+                </strong>
+                <p className="stat-sub">
+                  Sold {formatMoney(monthFlipProfit.sold)} · Cost{' '}
+                  {formatMoney(monthFlipProfit.purchased)}
+                  {monthFlipProfit.sellCount > 0
+                    ? ` · ${monthFlipProfit.sellCount} sell${
+                        monthFlipProfit.sellCount === 1 ? '' : 's'
+                      }`
+                    : ''}
+                  {' · '}
+                  <button
+                    type="button"
+                    className="text-link quiet-strip-link"
+                    onClick={() => {
+                      writeGearSubTab('cash')
+                      setTab('gear')
+                    }}
+                  >
+                    Open Gear flips
+                  </button>
+                </p>
+              </div>
+            ) : null}
             <div>
               <span className="stat-label">Variable budget</span>
               <strong>{formatMoney(insightVariableBudget)}</strong>
@@ -2434,6 +2517,9 @@ export default function App() {
                             {row.transactionCount === 1 ? '' : 's'}
                             {row.refunds > 0
                               ? ` · refunds ${formatMoney(row.refunds)}`
+                              : ''}
+                            {row.cashIns > 0
+                              ? ` · cash in ${formatMoney(row.cashIns)}`
                               : ''}
                             {' · '}
                             {expanded ? 'Hide' : 'Most recent'}
@@ -3162,14 +3248,17 @@ export default function App() {
                     )
                     if (rows.length === 0) return null
                     const spent = rows
-                      .filter((t) => !t.isRefund)
+                      .filter((t) => !isMoneyIn(t))
                       .reduce((sum, t) => sum + t.amount, 0)
                     const refunds = rows
                       .filter((t) => t.isRefund)
                       .reduce((sum, t) => sum + t.amount, 0)
-                    const net = Math.round((spent - refunds) * 100) / 100
+                    const cashIns = rows
+                      .filter((t) => t.isCashIn && !t.isRefund)
+                      .reduce((sum, t) => sum + t.amount, 0)
+                    const net = Math.round((spent - refunds - cashIns) * 100) / 100
                     const monthNet = visibleTx.reduce((sum, t) => {
-                      return sum + (t.isRefund ? -t.amount : t.amount)
+                      return sum + (isMoneyIn(t) ? -t.amount : t.amount)
                     }, 0)
                     const share =
                       monthNet > 0
@@ -3216,10 +3305,13 @@ export default function App() {
                   return null
                 }
                 const spent = rows
-                  .filter((t) => !t.isRefund)
+                  .filter((t) => !isMoneyIn(t))
                   .reduce((sum, t) => sum + t.amount, 0)
                 const refunds = rows
                   .filter((t) => t.isRefund)
+                  .reduce((sum, t) => sum + t.amount, 0)
+                const cashIns = rows
+                  .filter((t) => t.isCashIn && !t.isRefund)
                   .reduce((sum, t) => sum + t.amount, 0)
                 return (
                   <section className="panel" key={account.id}>
@@ -3237,6 +3329,10 @@ export default function App() {
                             : `${rows.length} transaction${rows.length === 1 ? '' : 's'}${
                                 refunds > 0
                                   ? ` · refunds ${formatMoney(refunds)}`
+                                  : ''
+                              }${
+                                cashIns > 0
+                                  ? ` · cash in ${formatMoney(cashIns)}`
                                   : ''
                               }`}
                         </p>
@@ -3269,9 +3365,10 @@ export default function App() {
         <div className="layout">
           <div className="panel-header bare">
             <div>
-              <h2>Log expense</h2>
+              <h2>Log entry</h2>
               <p>
-                Add a one-off charge — leftover updates as soon as you save
+                Add an expense, refund, or cash in — leftover updates as soon as
+                you save
               </p>
             </div>
           </div>
@@ -3676,6 +3773,9 @@ function CategoryAccordionRow({
   const refunds = transactions
     .filter((t) => t.isRefund)
     .reduce((sum, t) => sum + t.amount, 0)
+  const cashIns = transactions
+    .filter((t) => t.isCashIn && !t.isRefund)
+    .reduce((sum, t) => sum + t.amount, 0)
   const merchantRows = useMemo(
     () => rollupMerchants(transactions),
     [transactions],
@@ -3722,6 +3822,7 @@ function CategoryAccordionRow({
               {transactions.length} transaction
               {transactions.length === 1 ? '' : 's'}
               {refunds > 0 ? ` · refunds ${formatMoney(refunds)}` : ''}
+              {cashIns > 0 ? ` · cash in ${formatMoney(cashIns)}` : ''}
             </p>
             <button
               type="button"
@@ -3877,10 +3978,10 @@ function TransactionTable({
         return (
           <li
             key={t.id}
-            className={`tx-row${t.isRefund ? ' is-refund' : ''}${isEditing ? ' is-editing' : ''}`}
+            className={`tx-row${isMoneyIn(t) ? ' is-refund' : ''}${isEditing ? ' is-editing' : ''}`}
           >
             <span
-              className={`tx-rail${t.isRefund ? ' in' : ' out'}`}
+              className={`tx-rail${isMoneyIn(t) ? ' in' : ' out'}`}
               aria-hidden
             />
             <div className="tx-main">
@@ -3888,6 +3989,9 @@ function TransactionTable({
                 {t.merchant}
                 {t.isRefund ? (
                   <span className="cash-type in">Refund</span>
+                ) : null}
+                {t.isCashIn && !t.isRefund ? (
+                  <span className="cash-type in">Cash in</span>
                 ) : null}
               </div>
               <div className="tx-meta">
@@ -3913,9 +4017,9 @@ function TransactionTable({
             </div>
             <div className="tx-side">
               <span
-                className={`cash-delta${t.isRefund ? ' in' : ' out'}`}
+                className={`cash-delta${isMoneyIn(t) ? ' in' : ' out'}`}
               >
-                {t.isRefund ? '+' : '−'}
+                {isMoneyIn(t) ? '+' : '−'}
                 {formatMoney(t.amount)}
               </span>
               {editable ? (
@@ -4166,11 +4270,14 @@ function RecentChargeList({
               {t.isRefund ? (
                 <span className="cash-type in"> Refund</span>
               ) : null}
+              {t.isCashIn && !t.isRefund ? (
+                <span className="cash-type in"> Cash in</span>
+              ) : null}
             </span>
             <span
-              className={`recent-charge-amount ${t.isRefund ? 'in' : 'out'}`}
+              className={`recent-charge-amount ${isMoneyIn(t) ? 'in' : 'out'}`}
             >
-              {t.isRefund ? '+' : '−'}
+              {isMoneyIn(t) ? '+' : '−'}
               {formatMoney(t.amount)}
             </span>
           </li>
@@ -4189,6 +4296,7 @@ function PersonCard({
     income: number
     grossSpend: number
     refunds: number
+    cashIns?: number
     netSpend: number
     fixedBudget: number
     afterFixed: number

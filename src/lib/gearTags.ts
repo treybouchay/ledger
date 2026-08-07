@@ -94,14 +94,16 @@ export function isPadSizedKind(kind?: GearKind | null): boolean {
   return kind === 'pads' || kind === 'set_full'
 }
 
+/** Chest / pants / glove set use apparel letter sizes. Blocker & catcher do not. */
 export function isLetterSizedKind(kind?: GearKind | null): boolean {
   return (
-    kind === 'blocker' ||
-    kind === 'catcher' ||
-    kind === 'chestie' ||
-    kind === 'pants' ||
-    kind === 'set_gloves'
+    kind === 'chestie' || kind === 'pants' || kind === 'set_gloves'
   )
+}
+
+/** Blocker / catcher: custom size only (no XS–XXL chips). */
+export function isCustomSizedKind(kind?: GearKind | null): boolean {
+  return kind === 'blocker' || kind === 'catcher'
 }
 
 export function sizesForKind(
@@ -113,10 +115,21 @@ export function sizesForKind(
     return level === 'senior' ? PAD_SIZES_SR : PAD_SIZES_INT
   }
   if (isLetterSizedKind(kind)) return LETTER_SIZES
+  // Blocker / catcher: no preset chips — custom field only in the form.
   return []
 }
 
-/** Blocker/catcher sizes — used alone or as the glove half of a full set. */
+/** Whether this kind collects a primary size (chips and/or custom). */
+export function kindNeedsSize(kind?: GearKind | null): boolean {
+  if (!kind || kind === 'other') return false
+  return (
+    isPadSizedKind(kind) ||
+    isLetterSizedKind(kind) ||
+    isCustomSizedKind(kind)
+  )
+}
+
+/** Letter sizes for full-set glove half (blocker/catcher). */
 export function gloveSizes(): readonly string[] {
   return LETTER_SIZES
 }
@@ -139,18 +152,20 @@ function formatSizePart(tags: GearItemTags): string {
   return tags.size?.trim() || ''
 }
 
-/** Canonical display / link name from structured tags. */
+/** Canonical display / link name from structured tags.
+ * Order: Brand → Model → Type → Level → Size → Colour
+ */
 export function formatGearItemLabel(tags?: GearItemTags | null): string {
   if (!tags) return ''
   const parts: string[] = []
   if (tags.brand?.trim()) parts.push(tags.brand.trim())
+  if (tags.detail?.trim()) parts.push(tags.detail.trim())
   if (tags.kind && tags.kind !== 'other') parts.push(kindLabel(tags.kind))
   if (tags.level) parts.push(levelShort(tags.level))
   const sizePart = formatSizePart(tags)
   if (sizePart) parts.push(sizePart)
   if (tags.colour?.trim()) parts.push(tags.colour.trim())
-  if (tags.detail?.trim()) parts.push(tags.detail.trim())
-  else if (tags.kind === 'other' && !parts.length) return ''
+  if (tags.kind === 'other' && !parts.length) return ''
   return parts.join(' ').replace(/\s+/g, ' ').trim()
 }
 
@@ -172,15 +187,16 @@ export function gearTagsEqual(
   )
 }
 
-/** Compact chips for list rows. */
+/** Compact chips for list rows — brand / model / type / level / size / colour. */
 export function gearTagChips(tags?: GearItemTags | null): string[] {
   if (!tags) return []
   const chips: string[] = []
+  if (tags.brand?.trim()) chips.push(tags.brand.trim())
+  if (tags.detail?.trim()) chips.push(tags.detail.trim())
   if (tags.kind && tags.kind !== 'other') chips.push(kindLabel(tags.kind))
   if (tags.level) chips.push(levelShort(tags.level))
   const sizePart = formatSizePart(tags)
   if (sizePart) chips.push(sizePart)
-  if (tags.colour) chips.push(tags.colour)
-  if (tags.brand) chips.push(tags.brand)
+  if (tags.colour?.trim()) chips.push(tags.colour.trim())
   return chips
 }

@@ -20,7 +20,7 @@ export const BUDGETING_TABS = [
   ['budget', 'Income & bills'],
   ['categories', 'Categories'],
   ['transactions', 'Transactions'],
-  ['log', 'Log expense'],
+  ['log', 'Log entry'],
   ['upload', 'Import charges'],
 ] as const satisfies ReadonlyArray<readonly [AppTab, string]>
 

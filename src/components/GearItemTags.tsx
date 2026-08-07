@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import {
   GEAR_BRANDS,
   GEAR_COLOURS,
@@ -5,26 +6,58 @@ import {
   GEAR_LEVELS,
   emptyGearTags,
   formatGearItemLabel,
+  gearTagChips,
   gloveSizes,
+  isCustomSizedKind,
+  kindNeedsSize,
   sizesForKind,
 } from '../lib/gearTags'
 import type { GearItemTags, GearKind, GearLevel } from '../types'
+
+function GearTagStep({
+  show,
+  children,
+}: {
+  show: boolean
+  children: ReactNode
+}) {
+  if (!show) return null
+  return <div className="gear-tag-step">{children}</div>
+}
 
 export function GearItemTagsFields({
   value,
   onChange,
   required = true,
+  progressive = false,
 }: {
   value: GearItemTags
   onChange: (next: GearItemTags) => void
   required?: boolean
+  /** Reveal fields step-by-step as earlier choices are made. */
+  progressive?: boolean
 }) {
   const tags = value ?? emptyGearTags()
   const sizes = sizesForKind(tags.kind, tags.level)
   const gloveSizeOptions = gloveSizes()
   const needsLevel = Boolean(tags.kind && tags.kind !== 'other')
-  const needsSize = sizes.length > 0
+  const needsSize = kindNeedsSize(tags.kind)
   const needsGloveSize = tags.kind === 'set_full'
+  const customOnlySize = isCustomSizedKind(tags.kind)
+  const hasBrand = Boolean(tags.brand?.trim())
+
+  // Progressive: Brand → Model → Type → Level → Size → Colour
+  const showModel = !progressive || hasBrand
+  const showType = !progressive || hasBrand
+  const showLevel = !progressive || Boolean(tags.kind && needsLevel)
+  const showSize =
+    !progressive || (Boolean(tags.level) && (needsSize || needsGloveSize))
+  const showColour =
+    !progressive ||
+    (tags.kind === 'other'
+      ? Boolean(tags.kind)
+      : Boolean(tags.level))
+
   const preview = formatGearItemLabel(tags)
   const customColour =
     tags.colour &&
@@ -36,28 +69,38 @@ export function GearItemTagsFields({
       ? tags.brand
       : ''
   const customSize =
-    tags.size && needsSize && !sizes.includes(tags.size) ? tags.size : ''
+    !customOnlySize &&
+    tags.size &&
+    needsSize &&
+    sizes.length > 0 &&
+    !sizes.includes(tags.size)
+      ? tags.size
+      : ''
   const customGloveSize =
     tags.gloveSize &&
     needsGloveSize &&
     !gloveSizeOptions.includes(tags.gloveSize)
       ? tags.gloveSize
       : ''
+  const sizeInputValue = customOnlySize ? (tags.size ?? '') : customSize
 
   function patch(partial: Partial<GearItemTags>) {
     const next = { ...tags, ...partial }
     if (partial.kind !== undefined || partial.level !== undefined) {
       const nextSizes = sizesForKind(next.kind, next.level)
-      if (next.size && nextSizes.length && !nextSizes.includes(next.size)) {
-        next.size = null
+      if (next.size) {
+        if (!kindNeedsSize(next.kind)) {
+          next.size = null
+        } else if (
+          nextSizes.length > 0 &&
+          !nextSizes.includes(next.size) &&
+          !isCustomSizedKind(next.kind)
+        ) {
+          next.size = null
+        }
       }
       if (next.kind !== 'set_full') {
         next.gloveSize = null
-      } else if (
-        next.gloveSize &&
-        !gloveSizeOptions.includes(next.gloveSize)
-      ) {
-        // keep custom glove sizes
       }
       if (next.kind === 'other') {
         next.level = null
@@ -90,39 +133,84 @@ export function GearItemTagsFields({
           : 'Size'
 
   return (
-    <div className="gear-tags">
+    <div className={`gear-tags${progressive ? ' is-progressive' : ''}`}>
       <div className="gear-tag-group">
-        <span className="gear-tag-label">Type{required ? ' *' : ''}</span>
-        <div className="gear-tag-chips" role="group" aria-label="Gear type">
-          {GEAR_KINDS.map((k) => (
+        <span className="gear-tag-label">Brand</span>
+        <div className="gear-tag-chips" role="group" aria-label="Brand">
+          {GEAR_BRANDS.map((b) => (
             <button
-              key={k.id}
+              key={b}
               type="button"
-              className={`gear-tag-chip${tags.kind === k.id ? ' active' : ''}`}
-              aria-pressed={tags.kind === k.id}
-              title={
-                k.id === 'set_gloves'
-                  ? 'Blocker + catcher'
-                  : k.id === 'set_full'
-                    ? 'Pads + blocker + catcher'
-                    : undefined
-              }
-              onClick={() => toggleChip('kind', k.id as GearKind, tags.kind)}
+              className={`gear-tag-chip${tags.brand === b ? ' active' : ''}`}
+              aria-pressed={tags.brand === b}
+              onClick={() => toggleChip('brand', b, tags.brand)}
             >
-              {k.label}
+              {b}
             </button>
           ))}
         </div>
-        {tags.kind === 'set_gloves' || tags.kind === 'set_full' ? (
-          <p className="hint gear-tag-set-hint">
-            {tags.kind === 'set_gloves'
-              ? 'Blocker + catcher as one listing'
-              : 'Pads + blocker + catcher as one listing'}
-          </p>
+        <input
+          className="gear-tag-custom"
+          value={customBrand}
+          onChange={(e) =>
+            patch({ brand: e.target.value.trim() ? e.target.value : null })
+          }
+          placeholder="Other brand"
+        />
+        {progressive && !hasBrand ? (
+          <p className="hint gear-tag-step-hint">Pick a brand to continue</p>
         ) : null}
       </div>
 
-      {needsLevel ? (
+      <GearTagStep show={showModel}>
+        <label className="gear-tag-detail">
+          Model / detail
+          <input
+            value={tags.detail ?? ''}
+            onChange={(e) => patch({ detail: e.target.value || null })}
+            placeholder="e.g. Hyperlite 2, eflex 6.9, FULL RIGHT"
+            autoComplete="off"
+          />
+        </label>
+      </GearTagStep>
+
+      <GearTagStep show={showType}>
+        <div className="gear-tag-group">
+          <span className="gear-tag-label">Type{required ? ' *' : ''}</span>
+          <div className="gear-tag-chips" role="group" aria-label="Gear type">
+            {GEAR_KINDS.map((k) => (
+              <button
+                key={k.id}
+                type="button"
+                className={`gear-tag-chip${tags.kind === k.id ? ' active' : ''}`}
+                aria-pressed={tags.kind === k.id}
+                title={
+                  k.id === 'set_gloves'
+                    ? 'Blocker + catcher'
+                    : k.id === 'set_full'
+                      ? 'Pads + blocker + catcher'
+                      : undefined
+                }
+                onClick={() => toggleChip('kind', k.id as GearKind, tags.kind)}
+              >
+                {k.label}
+              </button>
+            ))}
+          </div>
+          {tags.kind === 'set_gloves' || tags.kind === 'set_full' ? (
+            <p className="hint gear-tag-set-hint">
+              {tags.kind === 'set_gloves'
+                ? 'Blocker + catcher as one listing'
+                : 'Pads + blocker + catcher as one listing'}
+            </p>
+          ) : null}
+          {progressive && hasBrand && !tags.kind ? (
+            <p className="hint gear-tag-step-hint">Pick a type to continue</p>
+          ) : null}
+        </div>
+      </GearTagStep>
+
+      <GearTagStep show={showLevel && needsLevel}>
         <div className="gear-tag-group">
           <span className="gear-tag-label">Level{required ? ' *' : ''}</span>
           <div className="gear-tag-chips" role="group" aria-label="Level">
@@ -140,37 +228,44 @@ export function GearItemTagsFields({
               </button>
             ))}
           </div>
+          {progressive && tags.kind && !tags.level ? (
+            <p className="hint gear-tag-step-hint">
+              Senior or intermediate?
+            </p>
+          ) : null}
         </div>
-      ) : null}
+      </GearTagStep>
 
-      {needsSize ? (
+      <GearTagStep show={showSize && needsSize}>
         <div className="gear-tag-group">
           <span className="gear-tag-label">{sizeLabel}</span>
-          <div className="gear-tag-chips" role="group" aria-label={sizeLabel}>
-            {sizes.map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={`gear-tag-chip${tags.size === s ? ' active' : ''}`}
-                aria-pressed={tags.size === s}
-                onClick={() => toggleChip('size', s, tags.size)}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+          {!customOnlySize && sizes.length > 0 ? (
+            <div className="gear-tag-chips" role="group" aria-label={sizeLabel}>
+              {sizes.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`gear-tag-chip${tags.size === s ? ' active' : ''}`}
+                  aria-pressed={tags.size === s}
+                  onClick={() => toggleChip('size', s, tags.size)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <input
             className="gear-tag-custom"
-            value={customSize}
+            value={sizeInputValue}
             onChange={(e) =>
               patch({ size: e.target.value.trim() ? e.target.value : null })
             }
-            placeholder="Custom size"
+            placeholder={customOnlySize ? 'Size (optional)' : 'Custom size'}
           />
         </div>
-      ) : null}
+      </GearTagStep>
 
-      {needsGloveSize ? (
+      <GearTagStep show={showSize && needsGloveSize}>
         <div className="gear-tag-group">
           <span className="gear-tag-label">Glove size (blocker / catcher)</span>
           <div
@@ -203,67 +298,34 @@ export function GearItemTagsFields({
             placeholder="Custom glove size"
           />
         </div>
-      ) : null}
+      </GearTagStep>
 
-      <div className="gear-tag-group">
-        <span className="gear-tag-label">Colour</span>
-        <div className="gear-tag-chips" role="group" aria-label="Colour">
-          {GEAR_COLOURS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={`gear-tag-chip${tags.colour === c ? ' active' : ''}`}
-              aria-pressed={tags.colour === c}
-              onClick={() => toggleChip('colour', c, tags.colour)}
-            >
-              {c}
-            </button>
-          ))}
+      <GearTagStep show={showColour}>
+        <div className="gear-tag-group">
+          <span className="gear-tag-label">Colour</span>
+          <div className="gear-tag-chips" role="group" aria-label="Colour">
+            {GEAR_COLOURS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`gear-tag-chip${tags.colour === c ? ' active' : ''}`}
+                aria-pressed={tags.colour === c}
+                onClick={() => toggleChip('colour', c, tags.colour)}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+          <input
+            className="gear-tag-custom"
+            value={customColour}
+            onChange={(e) =>
+              patch({ colour: e.target.value.trim() ? e.target.value : null })
+            }
+            placeholder="Or type a colour"
+          />
         </div>
-        <input
-          className="gear-tag-custom"
-          value={customColour}
-          onChange={(e) =>
-            patch({ colour: e.target.value.trim() ? e.target.value : null })
-          }
-          placeholder="Or type a colour"
-        />
-      </div>
-
-      <div className="gear-tag-group">
-        <span className="gear-tag-label">Brand</span>
-        <div className="gear-tag-chips" role="group" aria-label="Brand">
-          {GEAR_BRANDS.map((b) => (
-            <button
-              key={b}
-              type="button"
-              className={`gear-tag-chip${tags.brand === b ? ' active' : ''}`}
-              aria-pressed={tags.brand === b}
-              onClick={() => toggleChip('brand', b, tags.brand)}
-            >
-              {b}
-            </button>
-          ))}
-        </div>
-        <input
-          className="gear-tag-custom"
-          value={customBrand}
-          onChange={(e) =>
-            patch({ brand: e.target.value.trim() ? e.target.value : null })
-          }
-          placeholder="Other brand"
-        />
-      </div>
-
-      <label className="gear-tag-detail">
-        Model / detail
-        <input
-          value={tags.detail ?? ''}
-          onChange={(e) => patch({ detail: e.target.value || null })}
-          placeholder="e.g. Hyperlite 2, eflex 6.9, FULL RIGHT"
-          autoComplete="off"
-        />
-      </label>
+      </GearTagStep>
 
       {preview ? (
         <p className="gear-tag-preview">
@@ -271,7 +333,9 @@ export function GearItemTagsFields({
         </p>
       ) : (
         <p className="hint gear-tag-preview">
-          Pick type{needsLevel ? ' and level' : ''} to build a standard label
+          {progressive && !hasBrand
+            ? 'Pick a brand to build a standard label'
+            : `Pick type${needsLevel ? ' and level' : ''} to build a standard label`}
         </p>
       )}
     </div>
@@ -279,22 +343,7 @@ export function GearItemTagsFields({
 }
 
 export function GearTagPills({ tags }: { tags?: GearItemTags | null }) {
-  if (!tags) return null
-  const sizePart =
-    tags.kind === 'set_full'
-      ? [tags.size, tags.gloveSize].filter(Boolean).join(' / ')
-      : tags.size
-  const chips = [
-    tags.kind && tags.kind !== 'other'
-      ? GEAR_KINDS.find((k) => k.id === tags.kind)?.label
-      : null,
-    tags.level
-      ? GEAR_LEVELS.find((l) => l.id === tags.level)?.short
-      : null,
-    sizePart || null,
-    tags.colour,
-    tags.brand,
-  ].filter(Boolean) as string[]
+  const chips = gearTagChips(tags)
   if (!chips.length) return null
   return (
     <div className="gear-tag-pills">

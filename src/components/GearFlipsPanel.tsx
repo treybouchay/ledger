@@ -19,8 +19,10 @@ import {
   keptBuyIds,
   linkCashMoves,
   normalizeCashItem,
+  openInventoryProjectedSummary,
   openNotListedBuysForMonth,
   rankLinkCandidates,
+  realizedFlipProfitForMonth,
   reconcileSeedCashDates,
   removeCashMove,
   sortCashMoves,
@@ -100,6 +102,328 @@ function tagsReady(tags: GearItemTags): boolean {
   if (!tags.kind) return false
   if (tags.kind !== 'other' && !tags.level) return false
   return Boolean(formatGearItemLabel(tags))
+}
+
+/** Visible cash-ledger description: date · item (date always included). */
+function cashMoveDescLabel(
+  item?: string | null,
+  date?: string | null,
+): string {
+  const dateLabel = date?.slice(0, 10) || 'No date'
+  const itemLabel = (item ?? '').trim() || 'Untitled'
+  return `${dateLabel} · ${itemLabel}`
+}
+
+function CashMoveDesc({
+  item,
+  date,
+  tags,
+}: {
+  item?: string | null
+  date?: string | null
+  tags?: GearItemTags | null
+}) {
+  const dateLabel = date?.slice(0, 10) || 'No date'
+  const itemLabel = (item ?? '').trim() || 'Untitled'
+  return (
+    <>
+      <div className="cash-move-item">
+        <time
+          className="cash-move-desc-date"
+          dateTime={date?.slice(0, 10) || undefined}
+        >
+          {dateLabel}
+        </time>
+        <span className="cash-move-desc-sep" aria-hidden>
+          ·
+        </span>
+        <span className="cash-move-desc-text">{itemLabel}</span>
+      </div>
+      <GearTagPills tags={tags} />
+    </>
+  )
+}
+
+function suggestionSearchBits(s: SellItemSuggestion): string[] {
+  return [
+    s.label,
+    s.tags?.kind,
+    s.tags?.level,
+    s.tags?.size,
+    s.tags?.gloveSize,
+    s.tags?.colour,
+    s.tags?.brand,
+    s.tags?.detail,
+  ].filter((v): v is string => Boolean(v && String(v).trim()))
+}
+
+/** Higher is a better match for the typed query. 0 = no match. */
+function scoreSuggestionMatch(s: SellItemSuggestion, qRaw: string): number {
+  const q = qRaw.trim().toLowerCase()
+  if (!q) return 0
+
+  const label = s.label.toLowerCase()
+  const bits = suggestionSearchBits(s).map((b) => b.toLowerCase())
+  const haystack = bits.join(' ')
+
+  let score = 0
+  if (label === q) score += 100
+  else if (label.startsWith(q)) score += 70
+  else if (label.includes(q)) score += 45
+
+  for (const bit of bits) {
+    if (bit === q) score += 40
+    else if (bit.startsWith(q)) score += 25
+    else if (bit.includes(q)) score += 12
+  }
+
+  const qTokens = q.split(/\s+/).filter((t) => t.length > 1)
+  if (qTokens.length > 1) {
+    let overlap = 0
+    for (const t of qTokens) {
+      if (haystack.includes(t)) overlap += 1
+    }
+    if (overlap === qTokens.length) score += 30
+    else if (overlap > 0) score += 8 * overlap
+  }
+
+  if (score === 0 && haystack.includes(q)) score = 5
+  return score
+}
+
+function suggestionMatchesQuery(
+  s: SellItemSuggestion,
+  qRaw: string,
+): boolean {
+  const q = qRaw.trim()
+  if (!q) return true
+  return scoreSuggestionMatch(s, q) > 0
+}
+
+/** Top matches for an inline search query (empty query → none). */
+function rankSuggestionMatches(
+  suggestions: SellItemSuggestion[],
+  qRaw: string,
+  limit: number,
+): SellItemSuggestion[] {
+  const q = qRaw.trim()
+  if (!q) return []
+  return suggestions
+    .map((s) => ({ s, score: scoreSuggestionMatch(s, q) }))
+    .filter((x) => x.score > 0)
+    .sort(
+      (a, b) =>
+        b.score - a.score || a.s.label.localeCompare(b.s.label),
+    )
+    .slice(0, limit)
+    .map((x) => x.s)
+}
+
+/** Search + browse open inventory when matching a sell to a buy. */
+function InventoryMatchPicker({
+  suggestions,
+  selectedKey,
+  onPick,
+  onClear,
+  onEnterManually,
+}: {
+  suggestions: SellItemSuggestion[]
+  selectedKey: string
+  onPick: (s: SellItemSuggestion) => void
+  onClear?: () => void
+  /** Skip matching and fill tags yourself (compose sell flow). */
+  onEnterManually?: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const [browseOpen, setBrowseOpen] = useState(false)
+  const [browseQuery, setBrowseQuery] = useState('')
+
+  const qTrimmed = query.trim()
+  const preview = rankSuggestionMatches(suggestions, query, 3)
+  const browseFiltered = suggestions.filter((s) =>
+    suggestionMatchesQuery(s, browseQuery),
+  )
+  const selected = suggestions.find((s) => s.key === selectedKey) ?? null
+
+  useEffect(() => {
+    if (!browseOpen) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setBrowseOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [browseOpen])
+
+  function renderRow(s: SellItemSuggestion, compact = false) {
+    const active = selectedKey === s.key
+    return (
+      <button
+        key={s.key}
+        type="button"
+        className={`inventory-match-row${active ? ' active' : ''}${compact ? ' compact' : ''}`}
+        aria-pressed={active}
+        onClick={() => {
+          onPick(s)
+          setBrowseOpen(false)
+          setQuery('')
+        }}
+      >
+        <span className="inventory-match-row-main">
+          <span className="inventory-match-row-label">
+            {s.label}
+          </span>
+          <GearTagPills tags={s.tags} />
+          <span className="inventory-match-row-meta">
+            Open value {formatMoney(s.remaining)}
+          </span>
+        </span>
+        <span className="inventory-match-row-check" aria-hidden>
+          {active ? '✓' : ''}
+        </span>
+      </button>
+    )
+  }
+
+  return (
+    <div className="inventory-match">
+      <div className="inventory-match-header">
+        <span className="inventory-match-title">Match inventory</span>
+        {selected ? (
+          <button
+            type="button"
+            className="ghost inventory-match-clear"
+            onClick={() => {
+              onClear?.()
+              setQuery('')
+            }}
+          >
+            Clear match
+          </button>
+        ) : null}
+      </div>
+      {selected ? (
+        <div className="inventory-match-selected">
+          <strong>{selected.label}</strong>
+          <GearTagPills tags={selected.tags} />
+          <span className="inventory-match-row-meta">
+            Open value {formatMoney(selected.remaining)}
+          </span>
+        </div>
+      ) : null}
+      <label className="inventory-match-search">
+        <span className="visually-hidden">Search inventory</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search brand, type, model, size…"
+          autoComplete="off"
+        />
+      </label>
+      {suggestions.length === 0 ? (
+        <p className="hint">No open buys to match yet.</p>
+      ) : qTrimmed && preview.length === 0 ? (
+        <p className="hint">No inventory matches this search.</p>
+      ) : preview.length > 0 ? (
+        <div className="inventory-match-list" role="list">
+          {preview.map((s) => renderRow(s, true))}
+        </div>
+      ) : null}
+      <div className="inventory-match-actions">
+        {suggestions.length > 0 ? (
+          <button
+            type="button"
+            className="ghost inventory-match-browse"
+            onClick={() => {
+              setBrowseQuery(query)
+              setBrowseOpen(true)
+            }}
+          >
+            Browse all inventory
+          </button>
+        ) : null}
+        {onEnterManually ? (
+          <button
+            type="button"
+            className="ghost inventory-match-manual"
+            onClick={onEnterManually}
+          >
+            Enter manually
+          </button>
+        ) : null}
+      </div>
+
+      {browseOpen ? (
+        <div
+          className="cash-link-modal-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setBrowseOpen(false)
+          }}
+        >
+          <div
+            className="cash-link-modal inventory-browse-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="inventory-browse-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cash-link-modal-header">
+              <div>
+                <h3 id="inventory-browse-title">Browse inventory</h3>
+                <p>Pick a buy to match this sell</p>
+              </div>
+              <button
+                type="button"
+                className="icon-btn"
+                title="Close"
+                aria-label="Close"
+                onClick={() => setBrowseOpen(false)}
+              >
+                <IconClose />
+              </button>
+            </div>
+            <label className="inventory-match-search inventory-browse-search">
+              <span className="visually-hidden">Search inventory</span>
+              <input
+                type="search"
+                value={browseQuery}
+                onChange={(e) => setBrowseQuery(e.target.value)}
+                placeholder="Search brand, type, model, size…"
+                autoComplete="off"
+                autoFocus
+              />
+            </label>
+            <div className="cash-link-modal-body">
+              {browseFiltered.length === 0 ? (
+                <p className="empty-note">No inventory matches this search.</p>
+              ) : (
+                <div className="inventory-match-list browse" role="list">
+                  {browseFiltered.map((s) => renderRow(s))}
+                </div>
+              )}
+            </div>
+            <div className="cash-link-modal-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setBrowseOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => setBrowseOpen(false)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function IconEdit() {
@@ -833,13 +1157,13 @@ function ProjectedProfitView({
                             </span>
                             <span className="cash-link-candidate-main">
                               <span className="cash-link-candidate-item">
-                                {move.item || 'Untitled'}
+                                {cashMoveDescLabel(move.item, move.date)}
                               </span>
+                              <GearTagPills tags={move.tags} />
                               <span className="cash-link-candidate-meta">
-                                {move.date?.slice(0, 10) || 'No date'}
                                 {listing === 'listed'
-                                  ? ' · Listed'
-                                  : ' · Not listed'}
+                                  ? 'Listed'
+                                  : 'Not listed'}
                               </span>
                             </span>
                             <span className="cash-link-candidate-amt out">
@@ -1066,14 +1390,12 @@ function ProjectedProfitView({
                   >
                     <CashMoveRail tone="out" />
                     <div className="cash-move-main">
-                      <div className="cash-move-item">
-                        {move.item || 'Untitled'}
-                      </div>
-                      <GearTagPills tags={move.tags} />
+                      <CashMoveDesc
+                        item={move.item}
+                        date={move.date}
+                        tags={move.tags}
+                      />
                       <div className="cash-move-meta">
-                        <time className="cash-move-date">
-                          {move.date?.slice(0, 10) || 'No date'}
-                        </time>
                         <span
                           className={
                             listing === 'listed'
@@ -1385,6 +1707,7 @@ function CashLedger({
   openingBalance,
   moves,
   keepList,
+  projectedTargets,
   onChangeOpening,
   onChangeMoves,
   onKeepBuy,
@@ -1392,6 +1715,7 @@ function CashLedger({
   openingBalance: number
   moves: GearCashMove[]
   keepList: GearKeepItem[]
+  projectedTargets: Record<string, number | null>
   onChangeOpening: (n: number) => void
   onChangeMoves: (moves: GearCashMove[]) => void
   onKeepBuy: (move: GearCashMove) => void
@@ -1401,10 +1725,15 @@ function CashLedger({
   const [tags, setTags] = useState<GearItemTags>(() => emptyGearTags())
   const [amount, setAmount] = useState('')
   const [soldVia, setSoldVia] = useState<GearSoldVia | null>(null)
+  /** When set, new sell is linked to this buy after insert. */
+  const [matchBuyId, setMatchBuyId] = useState<string | null>(null)
+  const [matchKey, setMatchKey] = useState('')
+  const [sellDetailsOpen, setSellDetailsOpen] = useState(false)
   const [showBuys, setShowBuys] = useState(true)
   const [showSells, setShowSells] = useState(true)
-  const [buyDateSort, setBuyDateSort] = useState<CashDateSort>('asc')
-  const [sellDateSort, setSellDateSort] = useState<CashDateSort>('asc')
+  /** Newest first — date is part of the default description. */
+  const [buyDateSort, setBuyDateSort] = useState<CashDateSort>('desc')
+  const [sellDateSort, setSellDateSort] = useState<CashDateSort>('desc')
   const [buyTagFilter, setBuyTagFilter] = useState<BuyTagFilter>('all')
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterItem, setFilterItem] = useState('')
@@ -1456,16 +1785,6 @@ function CashLedger({
     [moves, excludedBuys],
   )
 
-  function filterSellSuggestions(queryLabel: string) {
-    const q = normalizeCashItem(queryLabel)
-    const list = q
-      ? sellItemSuggestions.filter(
-          (s) => s.key.includes(q) || normalizeCashItem(s.label).includes(q),
-        )
-      : sellItemSuggestions
-    return list.slice(0, 10)
-  }
-
   function applySellSuggestion(
     s: SellItemSuggestion,
     apply: (next: GearItemTags) => void,
@@ -1481,32 +1800,26 @@ function CashLedger({
     })
   }
 
-  function renderSellItemSuggestions(
-    currentLabel: string,
-    apply: (next: GearItemTags) => void,
-  ) {
-    const chips = filterSellSuggestions(currentLabel)
-    if (!chips.length) return null
-    const selectedKey = normalizeCashItem(currentLabel)
-    return (
-      <div className="cash-item-suggest">
-        <span className="cash-item-suggest-label">From inventory</span>
-        <div className="cash-item-suggest-chips" role="group" aria-label="Suggested items from buys">
-          {chips.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              className={`cash-item-suggest-chip${selectedKey === s.key ? ' active' : ''}`}
-              title={`Unmatched buy value ${formatMoney(s.remaining)}`}
-              aria-pressed={selectedKey === s.key}
-              onClick={() => applySellSuggestion(s, apply)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    )
+  function pickInventoryMatch(s: SellItemSuggestion) {
+    applySellSuggestion(s, setTags)
+    setMatchKey(s.key)
+    setMatchBuyId(s.buyId ?? null)
+    setSellDetailsOpen(false)
+  }
+
+  function clearInventoryMatch() {
+    setMatchKey('')
+    setMatchBuyId(null)
+    setTags(emptyGearTags())
+    setSellDetailsOpen(false)
+  }
+
+  function resetComposeForMode(next: 'in' | 'out') {
+    setMode(next)
+    setMatchKey('')
+    setMatchBuyId(null)
+    setSellDetailsOpen(false)
+    if (next === 'out') setSoldVia(null)
   }
 
   const filteredBuys = useMemo(() => {
@@ -1571,6 +1884,16 @@ function CashLedger({
   const balance = cashBalance(openingBalance, moves)
   const moneyIn = sumNullable(sells.map((m) => m.amount))
   const moneyOut = sumNullable(buys.map((m) => m.amount))
+  const inventorySummary = useMemo(
+    () => openInventoryProjectedSummary(moves, keepList, projectedTargets),
+    [moves, keepList, projectedTargets],
+  )
+  // Cash ledger has no month picker — use current calendar month (YYYY-MM).
+  const profitMonthId = new Date().toISOString().slice(0, 7)
+  const monthFlipProfit = useMemo(
+    () => realizedFlipProfitForMonth(moves, profitMonthId),
+    [moves, profitMonthId],
+  )
 
   useEffect(() => {
     if (!pendingJump) return
@@ -1837,9 +2160,16 @@ function CashLedger({
       listingStatus: mode === 'out' ? 'not_listed' : null,
       createdAt: new Date().toISOString(),
     }
-    onChangeMoves(autoLinkCashMoves(insertCashMoveSorted(moves, move)))
+    let next = autoLinkCashMoves(insertCashMoveSorted(moves, move))
+    if (mode === 'in' && matchBuyId) {
+      next = linkCashMoves(next, move.id, matchBuyId)
+    }
+    onChangeMoves(next)
     setTags(emptyGearTags())
     setAmount('')
+    setMatchKey('')
+    setMatchBuyId(null)
+    setSellDetailsOpen(false)
     if (mode === 'in') setSoldVia(null)
   }
 
@@ -2002,10 +2332,11 @@ function CashLedger({
         <GearItemTagsFields value={editTags} onChange={setEditTags} />
         {move.direction === 'in' ? (
           <>
-            {renderSellItemSuggestions(
-              formatGearItemLabel(editTags),
-              setEditTags,
-            )}
+            <InventoryMatchPicker
+              suggestions={sellItemSuggestions}
+              selectedKey={normalizeCashItem(formatGearItemLabel(editTags))}
+              onPick={(s) => applySellSuggestion(s, setEditTags)}
+            />
             <label className="cash-via-field">
               Sold on
               <SoldViaPicker value={editSoldVia} onChange={setEditSoldVia} />
@@ -2058,12 +2389,8 @@ function CashLedger({
       >
         <CashMoveRail tone={isSell ? 'in' : 'out'} />
         <div className="cash-move-main">
-          <div className="cash-move-item">{move.item || 'Untitled'}</div>
-          <GearTagPills tags={move.tags} />
+          <CashMoveDesc item={move.item} date={move.date} tags={move.tags} />
           <div className="cash-move-meta">
-            <time className="cash-move-date">
-              {move.date?.slice(0, 10) || 'No date'}
-            </time>
             {isSell ? (
               <SoldViaPicker
                 value={move.soldVia}
@@ -2144,14 +2471,16 @@ function CashLedger({
             </span>
             <span className="cash-link-candidate-main">
               <span className="cash-link-candidate-item">
-                {move.item || 'Untitled'}
+                {cashMoveDescLabel(move.item, move.date)}
               </span>
+              <GearTagPills tags={move.tags} />
               <span className="cash-link-candidate-meta">
-                {move.date?.slice(0, 10) || 'No date'}
                 {move.direction === 'in' && move.soldVia
-                  ? ` · ${move.soldVia.toUpperCase()}`
+                  ? move.soldVia.toUpperCase()
                   : ''}
-                {selected ? ' · in group' : ''}
+                {selected
+                  ? `${move.direction === 'in' && move.soldVia ? ' · ' : ''}in group`
+                  : ''}
               </span>
             </span>
             <span
@@ -2204,13 +2533,11 @@ function CashLedger({
               {sourceNoun === 'buy' ? 'Buy' : 'Sell'}
             </span>
             <div className="cash-link-source-body">
-              <strong>{source.item || 'Untitled'}</strong>
-              <span>
-                {source.date?.slice(0, 10) || 'No date'} ·{' '}
-                <span className={source.direction === 'in' ? 'in' : 'out'}>
-                  {source.direction === 'in' ? '+' : '−'}
-                  {formatMoney(source.amount)}
-                </span>
+              <strong>{cashMoveDescLabel(source.item, source.date)}</strong>
+              <GearTagPills tags={source.tags} />
+              <span className={source.direction === 'in' ? 'in' : 'out'}>
+                {source.direction === 'in' ? '+' : '−'}
+                {formatMoney(source.amount)}
               </span>
             </div>
           </div>
@@ -2258,98 +2585,152 @@ function CashLedger({
   return (
     <div className="layout">
       {renderLinkModal()}
-      <div className={`cash-hero${cashMathOpen ? ' is-open' : ''}`}>
-        <div className="cash-hero-grid">
-          <button
-            type="button"
-            className="cash-on-hand-toggle"
-            aria-expanded={cashMathOpen}
-            aria-controls="cash-on-hand-math"
-            onClick={() => setCashMathOpen((v) => !v)}
-          >
-            <span className="cash-on-hand-toggle-copy">
-              <span className="stat-label">Cash on hand</span>
-              <span className={`stat-value ${balance >= 0 ? 'good' : 'bad'}`}>
-                {formatMoney(balance)}
-              </span>
-              <span className="stat-sub">
-                Opening {formatMoney(openingBalance)} + sold{' '}
-                {formatMoney(moneyIn)} − bought {formatMoney(moneyOut)}
-              </span>
-            </span>
-            <span
-              className={`cash-on-hand-chevron${cashMathOpen ? ' open' : ''}`}
-              aria-hidden
+      <div className="cash-summary-row">
+        <div className={`cash-hero${cashMathOpen ? ' is-open' : ''}`}>
+          <div className="cash-hero-grid">
+            <button
+              type="button"
+              className="cash-on-hand-toggle"
+              aria-expanded={cashMathOpen}
+              aria-controls="cash-on-hand-math"
+              onClick={() => setCashMathOpen((v) => !v)}
             >
-              ›
-            </span>
-          </button>
-          <label className="cash-opening">
-            Opening balance
-            <input
-              type="number"
-              step="0.01"
-              value={openingBalance}
-              onChange={(e) => onChangeOpening(Number(e.target.value) || 0)}
-            />
-          </label>
-        </div>
-        {cashMathOpen ? (
-          <ul id="cash-on-hand-math" className="cash-on-hand-math">
-            <li className="cash-math-row">
-              <div className="cash-math-main">
-                <span className="cash-math-item">Opening balance</span>
-              </div>
-              <div className="cash-math-figures">
-                <span className="cash-math-delta muted">
-                  {formatMoney(openingBalance)}
-                </span>
-                <span className="cash-math-run">
-                  {formatMoney(openingBalance)}
-                </span>
-              </div>
-            </li>
-            {timeline.map(({ move, delta, balance: after }) => {
-              const isSell = move.direction === 'in'
-              return (
-                <li key={move.id} className="cash-math-row">
-                  <div className="cash-math-main">
-                    <span className="cash-math-item">
-                      {move.item || 'Untitled'}
-                    </span>
-                    <span className="cash-math-meta">
-                      <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
-                        {isSell ? 'Sell' : 'Buy'}
-                      </span>
-                      <time>{move.date?.slice(0, 10) || 'No date'}</time>
-                    </span>
-                  </div>
-                  <div className="cash-math-figures">
-                    <span
-                      className={`cash-math-delta ${delta >= 0 ? 'in' : 'out'}`}
-                    >
-                      {delta >= 0 ? '+' : '−'}
-                      {formatMoney(Math.abs(delta))}
-                    </span>
-                    <span className="cash-math-run">{formatMoney(after)}</span>
-                  </div>
-                </li>
-              )
-            })}
-            <li className="cash-math-row cash-math-total">
-              <div className="cash-math-main">
-                <span className="cash-math-item">Cash on hand</span>
-              </div>
-              <div className="cash-math-figures">
-                <span
-                  className={`cash-math-run total ${balance >= 0 ? 'good' : 'bad'}`}
-                >
+              <span className="cash-on-hand-toggle-copy">
+                <span className="stat-label">Cash on hand</span>
+                <span className={`stat-value ${balance >= 0 ? 'good' : 'bad'}`}>
                   {formatMoney(balance)}
                 </span>
-              </div>
-            </li>
-          </ul>
-        ) : null}
+                <span className="stat-sub">
+                  Opening {formatMoney(openingBalance)} + sold{' '}
+                  {formatMoney(moneyIn)} − bought {formatMoney(moneyOut)}
+                </span>
+              </span>
+              <span
+                className={`cash-on-hand-chevron${cashMathOpen ? ' open' : ''}`}
+                aria-hidden
+              >
+                ›
+              </span>
+            </button>
+            <label className="cash-opening">
+              Opening balance
+              <input
+                type="number"
+                step="0.01"
+                value={openingBalance}
+                onChange={(e) => onChangeOpening(Number(e.target.value) || 0)}
+              />
+            </label>
+          </div>
+          {cashMathOpen ? (
+            <ul id="cash-on-hand-math" className="cash-on-hand-math">
+              <li className="cash-math-row">
+                <div className="cash-math-main">
+                  <span className="cash-math-item">Opening balance</span>
+                </div>
+                <div className="cash-math-figures">
+                  <span className="cash-math-delta muted">
+                    {formatMoney(openingBalance)}
+                  </span>
+                  <span className="cash-math-run">
+                    {formatMoney(openingBalance)}
+                  </span>
+                </div>
+              </li>
+              {timeline.map(({ move, delta, balance: after }) => {
+                const isSell = move.direction === 'in'
+                return (
+                  <li key={move.id} className="cash-math-row">
+                    <div className="cash-math-main">
+                      <span className="cash-math-item">
+                        {cashMoveDescLabel(move.item, move.date)}
+                      </span>
+                      <span className="cash-math-meta">
+                        <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
+                          {isSell ? 'Sell' : 'Buy'}
+                        </span>
+                        <GearTagPills tags={move.tags} />
+                      </span>
+                    </div>
+                    <div className="cash-math-figures">
+                      <span
+                        className={`cash-math-delta ${delta >= 0 ? 'in' : 'out'}`}
+                      >
+                        {delta >= 0 ? '+' : '−'}
+                        {formatMoney(Math.abs(delta))}
+                      </span>
+                      <span className="cash-math-run">{formatMoney(after)}</span>
+                    </div>
+                  </li>
+                )
+              })}
+              <li className="cash-math-row cash-math-total">
+                <div className="cash-math-main">
+                  <span className="cash-math-item">Cash on hand</span>
+                </div>
+                <div className="cash-math-figures">
+                  <span
+                    className={`cash-math-run total ${balance >= 0 ? 'good' : 'bad'}`}
+                  >
+                    {formatMoney(balance)}
+                  </span>
+                </div>
+              </li>
+            </ul>
+          ) : null}
+        </div>
+
+        <div className="cash-outlook-card">
+          <span className="stat-label">Inventory & outlook</span>
+          {inventorySummary.total === 0 ? (
+            <p className="stat-sub cash-inventory-empty">In stock: none</p>
+          ) : (
+            <>
+              <p className="stat-sub cash-inventory-kinds">
+                In stock:{' '}
+                {inventorySummary.byKind
+                  .map((k) => `${k.label} ${k.count}`)
+                  .join(' · ')}
+              </p>
+              <p className="stat-sub cash-inventory-projected">
+                {inventorySummary.pricedCount === 0 ? (
+                  <>Projected if sold: —</>
+                ) : (
+                  <>
+                    Projected if sold:{' '}
+                    <span className="cash-inventory-projected-value good">
+                      +{formatMoney(inventorySummary.projectedCash)}
+                    </span>
+                    {inventorySummary.pricedCount < inventorySummary.total
+                      ? ` (${inventorySummary.pricedCount} of ${inventorySummary.total} priced)`
+                      : null}
+                  </>
+                )}
+              </p>
+              <p className="stat-sub cash-inventory-potential">
+                Potential cash on hand:{' '}
+                <span className="cash-inventory-projected-value">
+                  {formatMoney(balance + inventorySummary.projectedCash)}
+                </span>
+              </p>
+            </>
+          )}
+          <p className="stat-sub cash-inventory-profit">
+            Profit this month (realized):{' '}
+            <span
+              className={`cash-inventory-projected-value${
+                monthFlipProfit.profit > 0
+                  ? ' good'
+                  : monthFlipProfit.profit < 0
+                    ? ' bad'
+                    : ''
+              }`}
+            >
+              {monthFlipProfit.profit > 0 ? '+' : ''}
+              {formatMoney(monthFlipProfit.profit)}
+            </span>
+          </p>
+        </div>
       </div>
 
       <section className="panel">
@@ -2388,7 +2769,7 @@ function CashLedger({
             <button
               type="button"
               className={`cash-mode out${mode === 'out' ? ' active' : ''}`}
-              onClick={() => setMode('out')}
+              onClick={() => resetComposeForMode('out')}
             >
               Buy / spend
               <span>Money out</span>
@@ -2396,7 +2777,7 @@ function CashLedger({
             <button
               type="button"
               className={`cash-mode in${mode === 'in' ? ' active' : ''}`}
-              onClick={() => setMode('in')}
+              onClick={() => resetComposeForMode('in')}
             >
               Sell / deposit
               <span>Money in</span>
@@ -2428,21 +2809,69 @@ function CashLedger({
               </div>
             </label>
           </div>
-          <GearItemTagsFields value={tags} onChange={setTags} />
+
           {mode === 'in' ? (
-            <>
-              {renderSellItemSuggestions(formatGearItemLabel(tags), setTags)}
+            <div className="gear-tag-step cash-compose-step">
+              <InventoryMatchPicker
+                suggestions={sellItemSuggestions}
+                selectedKey={matchKey}
+                onPick={pickInventoryMatch}
+                onClear={clearInventoryMatch}
+                onEnterManually={
+                  !matchKey && !sellDetailsOpen
+                    ? () => setSellDetailsOpen(true)
+                    : undefined
+                }
+              />
+            </div>
+          ) : null}
+
+          {mode === 'out' ||
+          matchKey ||
+          sellDetailsOpen ||
+          Boolean(tags.kind) ? (
+            <div className="gear-tag-step cash-compose-step">
+              {mode === 'in' && matchKey && !sellDetailsOpen ? (
+                <button
+                  type="button"
+                  className="ghost cash-compose-reveal"
+                  onClick={() => setSellDetailsOpen(true)}
+                >
+                  Adjust item details
+                </button>
+              ) : (
+                <GearItemTagsFields
+                  value={tags}
+                  onChange={(next) => {
+                    setTags(next)
+                    if (matchKey) {
+                      const label = formatGearItemLabel(next)
+                      if (normalizeCashItem(label) !== matchKey) {
+                        setMatchKey('')
+                        setMatchBuyId(null)
+                      }
+                    }
+                  }}
+                  progressive
+                />
+              )}
+            </div>
+          ) : null}
+
+          {mode === 'in' && tagsReady(tags) ? (
+            <div className="gear-tag-step cash-compose-step">
               <label className="cash-via-field">
                 Sold on
                 <SoldViaPicker value={soldVia} onChange={setSoldVia} />
               </label>
-            </>
+            </div>
           ) : null}
+
           <div className="cash-compose-actions">
             <p className="hint">
               {mode === 'in'
-                ? 'Pick type + level (or inventory chip) · creates a sell row'
-                : 'Pick type + level · creates a buy row'}
+                ? 'Match inventory or enter tags · creates a sell row'
+                : 'Fill brand → model → type step-by-step · creates a buy row'}
             </p>
             <button
               type="submit"
@@ -2584,7 +3013,7 @@ function CashLedger({
         <div className="panel-header">
           <div>
             <h2>Running balance</h2>
-            <p>Opening, then each buy/sell by date (newest at bottom)</p>
+            <p>Opening, then each buy/sell by date — description always includes date</p>
           </div>
         </div>
         <ul className="cash-timeline">
@@ -2611,16 +3040,15 @@ function CashLedger({
               >
                 <CashMoveRail tone={isSell ? 'in' : 'out'} />
                 <div className="cash-move-main">
-                  <div className="cash-move-item">
-                    {move.item || 'Untitled'}
-                  </div>
+                  <CashMoveDesc
+                    item={move.item}
+                    date={move.date}
+                    tags={move.tags}
+                  />
                   <div className="cash-move-meta">
                     <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
                       {isSell ? 'Sell' : 'Buy'}
                     </span>
-                    <time className="cash-move-date">
-                      {move.date?.slice(0, 10) || 'No date'}
-                    </time>
                     {isSell && move.soldVia ? (
                       <span className={`sold-via-pill ${move.soldVia}`}>
                         {SOLD_VIA.find((s) => s.id === move.soldVia)?.short}
@@ -3060,17 +3488,15 @@ function CashHistory({
                 >
                   <CashMoveRail tone={isSell ? 'in' : 'out'} />
                   <div className="cash-move-main">
-                    <div className="cash-move-item">
-                      {move.item || 'Untitled'}
-                    </div>
-                    <GearTagPills tags={move.tags} />
+                    <CashMoveDesc
+                      item={move.item}
+                      date={move.date}
+                      tags={move.tags}
+                    />
                     <div className="cash-move-meta">
                       <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
                         {isSell ? 'Sell' : 'Buy'}
                       </span>
-                      <time className="cash-move-date">
-                        {move.date?.slice(0, 10) || 'No date'}
-                      </time>
                       {isSell && move.soldVia ? (
                         <span className={`sold-via-pill ${move.soldVia}`}>
                           {SOLD_VIA.find((s) => s.id === move.soldVia)?.short}
@@ -3123,16 +3549,15 @@ function CashHistory({
                 >
                   <CashMoveRail tone={isSell ? 'in' : 'out'} />
                   <div className="cash-move-main">
-                    <div className="cash-move-item">
-                      {move.item || 'Untitled'}
-                    </div>
+                    <CashMoveDesc
+                      item={move.item}
+                      date={move.date}
+                      tags={move.tags}
+                    />
                     <div className="cash-move-meta">
                       <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
                         {isSell ? 'Sell' : 'Buy'}
                       </span>
-                      <time className="cash-move-date">
-                        {move.date?.slice(0, 10) || 'No date'}
-                      </time>
                     </div>
                   </div>
                   <div className="cash-move-side">
@@ -3343,6 +3768,7 @@ export function GearFlipsPanel({
           openingBalance={state.openingBalance}
           moves={state.cash}
           keepList={keepList}
+          projectedTargets={projectedTargets}
           onChangeOpening={(openingBalance) =>
             onChange({ ...state, openingBalance })
           }

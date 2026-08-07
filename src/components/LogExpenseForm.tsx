@@ -9,6 +9,15 @@ import {
 import { accountOptionLabel } from '../lib/labels'
 import type { AccountId, CategoryId, PersonId, Transaction } from '../types'
 
+type EntryKind = 'expense' | 'refund' | 'cash_in'
+
+function entryKindFromTx(tx?: Transaction): EntryKind {
+  if (!tx) return 'expense'
+  if (tx.isCashIn && !tx.isRefund) return 'cash_in'
+  if (tx.isRefund) return 'refund'
+  return 'expense'
+}
+
 interface LogExpenseFormProps {
   onSave: (tx: Transaction) => void
   onCancel?: () => void
@@ -44,7 +53,9 @@ export function LogExpenseForm({
     ),
   )
   const [notes, setNotes] = useState(initial?.notes ?? '')
-  const [isRefund, setIsRefund] = useState(initial?.isRefund ?? false)
+  const [entryKind, setEntryKind] = useState<EntryKind>(() =>
+    entryKindFromTx(initial),
+  )
 
   const personAccounts = accountsForPerson(personId)
 
@@ -70,7 +81,8 @@ export function LogExpenseForm({
       accountId: resolveAccountForPerson(accountId, personId),
       categoryId,
       notes: trimmedNotes || undefined,
-      isRefund,
+      isRefund: entryKind === 'refund',
+      isCashIn: entryKind === 'cash_in',
       source: initial?.source ?? 'manual',
       importId: initial?.importId,
       sourceFile: initial?.sourceFile,
@@ -80,13 +92,47 @@ export function LogExpenseForm({
       setMerchant('')
       setAmount('')
       setNotes('')
-      setIsRefund(false)
+      setEntryKind('expense')
     }
   }
+
+  const merchantPlaceholder =
+    entryKind === 'cash_in'
+      ? 'ATM deposit, e-transfer, cash…'
+      : entryKind === 'refund'
+        ? 'Amazon return, store rebate…'
+        : 'Metro, Starbucks…'
+
+  const submitLabel = editing
+    ? 'Save changes'
+    : entryKind === 'cash_in'
+      ? 'Save cash in'
+      : entryKind === 'refund'
+        ? 'Save refund'
+        : 'Save expense'
 
   return (
     <form className="log-form" onSubmit={submit}>
       <div className="log-grid">
+        <div className="span-full log-entry-kind" role="group" aria-label="Entry type">
+          {(
+            [
+              { id: 'expense' as const, label: 'Expense' },
+              { id: 'refund' as const, label: 'Refund' },
+              { id: 'cash_in' as const, label: 'Cash in' },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={`log-entry-chip${entryKind === opt.id ? ' active' : ''}`}
+              aria-pressed={entryKind === opt.id}
+              onClick={() => setEntryKind(opt.id)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
         <label>
           Date
           <input
@@ -133,11 +179,11 @@ export function LogExpenseForm({
           />
         </label>
         <label className="span-2">
-          Merchant
+          {entryKind === 'cash_in' ? 'Source' : 'Merchant'}
           <input
             value={merchant}
             onChange={(e) => setMerchant(e.target.value)}
-            placeholder="Metro, Starbucks…"
+            placeholder={merchantPlaceholder}
             required
           />
         </label>
@@ -153,23 +199,24 @@ export function LogExpenseForm({
             required
           />
         </label>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={isRefund}
-            onChange={(e) => setIsRefund(e.target.checked)}
-          />
-          Refund / rebate
-        </label>
         <label className="span-2">
           Note
           <input
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Optional"
+            placeholder={
+              entryKind === 'cash_in'
+                ? 'Optional — why you’re adding cash'
+                : 'Optional'
+            }
           />
         </label>
       </div>
+      {entryKind === 'cash_in' ? (
+        <p className="hint log-entry-hint">
+          Cash in adds money without counting as spend — separate from refunds.
+        </p>
+      ) : null}
       <div className="log-actions">
         {onCancel ? (
           <button type="button" className="ghost" onClick={onCancel}>
@@ -177,7 +224,7 @@ export function LogExpenseForm({
           </button>
         ) : null}
         <button type="submit" className="primary">
-          {editing ? 'Save changes' : 'Save expense'}
+          {submitLabel}
         </button>
       </div>
     </form>

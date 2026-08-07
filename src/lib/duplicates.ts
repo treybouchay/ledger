@@ -64,6 +64,7 @@ export function isNearDateDuplicate(
     amount: number
     merchant: string
     isRefund?: boolean
+    isCashIn?: boolean
   },
   b: {
     personId: PersonId
@@ -71,10 +72,12 @@ export function isNearDateDuplicate(
     amount: number
     merchant: string
     isRefund?: boolean
+    isCashIn?: boolean
   },
 ): boolean {
   if (a.personId !== b.personId) return false
   if (Boolean(a.isRefund) !== Boolean(b.isRefund)) return false
+  if (Boolean(a.isCashIn) !== Boolean(b.isCashIn)) return false
   if (!amountsEqual(a.amount, b.amount)) return false
   if (merchantsSimilar(a.merchant, b.merchant) !== 'strong') return false
   return daysApart(a.date, b.date) <= 1
