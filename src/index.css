@@ -2935,19 +2935,22 @@ select {
   background: var(--surface-hover);
 }
 
-.cash-summary-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 1rem;
-  align-items: start;
-}
-
 .cash-hero {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 1.15rem 1.25rem;
+}
+
+.cash-hero--highlight {
+  background: color-mix(in srgb, var(--surface-tint) 55%, #fff);
+  border-color: color-mix(in srgb, var(--good) 28%, var(--line));
+  box-shadow: var(--shadow-soft);
+}
+
+.cash-hero--highlight .stat-label {
+  color: color-mix(in srgb, var(--good) 72%, var(--ink));
 }
 
 .cash-hero-grid {
@@ -2958,23 +2961,15 @@ select {
   flex-wrap: wrap;
 }
 
-.cash-outlook-card {
-  background: color-mix(in srgb, var(--surface-tint) 55%, #fff);
-  border: 1px solid color-mix(in srgb, var(--good) 28%, var(--line));
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-soft);
-  padding: 1.15rem 1.25rem;
+.cash-hero-details {
   display: grid;
   gap: 0.35rem;
-  align-content: start;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--good) 18%, var(--line));
 }
 
-.cash-outlook-card .stat-label {
-  margin-bottom: 0.15rem;
-  color: color-mix(in srgb, var(--good) 72%, var(--ink));
-}
-
-.cash-outlook-card .stat-sub {
+.cash-hero-details .stat-sub {
   margin: 0;
 }
 
@@ -2996,15 +2991,9 @@ select {
 }
 
 .cash-inventory-profit {
-  margin-top: 0.25rem;
-  padding-top: 0.55rem;
-  border-top: 1px solid color-mix(in srgb, var(--good) 18%, var(--line));
-}
-
-@media (max-width: 720px) {
-  .cash-summary-row {
-    grid-template-columns: 1fr;
-  }
+  margin-top: 0.1rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid color-mix(in srgb, var(--good) 14%, var(--line));
 }
 
 .cash-on-hand-toggle {

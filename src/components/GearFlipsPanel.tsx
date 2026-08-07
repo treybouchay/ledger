@@ -2585,103 +2585,100 @@ function CashLedger({
   return (
     <div className="layout">
       {renderLinkModal()}
-      <div className="cash-summary-row">
-        <div className={`cash-hero${cashMathOpen ? ' is-open' : ''}`}>
-          <div className="cash-hero-grid">
-            <button
-              type="button"
-              className="cash-on-hand-toggle"
-              aria-expanded={cashMathOpen}
-              aria-controls="cash-on-hand-math"
-              onClick={() => setCashMathOpen((v) => !v)}
+      <div className={`cash-hero cash-hero--highlight${cashMathOpen ? ' is-open' : ''}`}>
+        <div className="cash-hero-grid">
+          <button
+            type="button"
+            className="cash-on-hand-toggle"
+            aria-expanded={cashMathOpen}
+            aria-controls="cash-on-hand-math"
+            onClick={() => setCashMathOpen((v) => !v)}
+          >
+            <span className="cash-on-hand-toggle-copy">
+              <span className="stat-label">Cash on hand</span>
+              <span className={`stat-value ${balance >= 0 ? 'good' : 'bad'}`}>
+                {formatMoney(balance)}
+              </span>
+              <span className="stat-sub">
+                Opening {formatMoney(openingBalance)} + sold{' '}
+                {formatMoney(moneyIn)} − bought {formatMoney(moneyOut)}
+              </span>
+            </span>
+            <span
+              className={`cash-on-hand-chevron${cashMathOpen ? ' open' : ''}`}
+              aria-hidden
             >
-              <span className="cash-on-hand-toggle-copy">
-                <span className="stat-label">Cash on hand</span>
-                <span className={`stat-value ${balance >= 0 ? 'good' : 'bad'}`}>
+              ›
+            </span>
+          </button>
+          <label className="cash-opening">
+            Opening balance
+            <input
+              type="number"
+              step="0.01"
+              value={openingBalance}
+              onChange={(e) => onChangeOpening(Number(e.target.value) || 0)}
+            />
+          </label>
+        </div>
+        {cashMathOpen ? (
+          <ul id="cash-on-hand-math" className="cash-on-hand-math">
+            <li className="cash-math-row">
+              <div className="cash-math-main">
+                <span className="cash-math-item">Opening balance</span>
+              </div>
+              <div className="cash-math-figures">
+                <span className="cash-math-delta muted">
+                  {formatMoney(openingBalance)}
+                </span>
+                <span className="cash-math-run">
+                  {formatMoney(openingBalance)}
+                </span>
+              </div>
+            </li>
+            {timeline.map(({ move, delta, balance: after }) => {
+              const isSell = move.direction === 'in'
+              return (
+                <li key={move.id} className="cash-math-row">
+                  <div className="cash-math-main">
+                    <span className="cash-math-item">
+                      {cashMoveDescLabel(move.item, move.date)}
+                    </span>
+                    <span className="cash-math-meta">
+                      <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
+                        {isSell ? 'Sell' : 'Buy'}
+                      </span>
+                      <GearTagPills tags={move.tags} />
+                    </span>
+                  </div>
+                  <div className="cash-math-figures">
+                    <span
+                      className={`cash-math-delta ${delta >= 0 ? 'in' : 'out'}`}
+                    >
+                      {delta >= 0 ? '+' : '−'}
+                      {formatMoney(Math.abs(delta))}
+                    </span>
+                    <span className="cash-math-run">{formatMoney(after)}</span>
+                  </div>
+                </li>
+              )
+            })}
+            <li className="cash-math-row cash-math-total">
+              <div className="cash-math-main">
+                <span className="cash-math-item">Cash on hand</span>
+              </div>
+              <div className="cash-math-figures">
+                <span
+                  className={`cash-math-run total ${balance >= 0 ? 'good' : 'bad'}`}
+                >
                   {formatMoney(balance)}
                 </span>
-                <span className="stat-sub">
-                  Opening {formatMoney(openingBalance)} + sold{' '}
-                  {formatMoney(moneyIn)} − bought {formatMoney(moneyOut)}
-                </span>
-              </span>
-              <span
-                className={`cash-on-hand-chevron${cashMathOpen ? ' open' : ''}`}
-                aria-hidden
-              >
-                ›
-              </span>
-            </button>
-            <label className="cash-opening">
-              Opening balance
-              <input
-                type="number"
-                step="0.01"
-                value={openingBalance}
-                onChange={(e) => onChangeOpening(Number(e.target.value) || 0)}
-              />
-            </label>
-          </div>
-          {cashMathOpen ? (
-            <ul id="cash-on-hand-math" className="cash-on-hand-math">
-              <li className="cash-math-row">
-                <div className="cash-math-main">
-                  <span className="cash-math-item">Opening balance</span>
-                </div>
-                <div className="cash-math-figures">
-                  <span className="cash-math-delta muted">
-                    {formatMoney(openingBalance)}
-                  </span>
-                  <span className="cash-math-run">
-                    {formatMoney(openingBalance)}
-                  </span>
-                </div>
-              </li>
-              {timeline.map(({ move, delta, balance: after }) => {
-                const isSell = move.direction === 'in'
-                return (
-                  <li key={move.id} className="cash-math-row">
-                    <div className="cash-math-main">
-                      <span className="cash-math-item">
-                        {cashMoveDescLabel(move.item, move.date)}
-                      </span>
-                      <span className="cash-math-meta">
-                        <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
-                          {isSell ? 'Sell' : 'Buy'}
-                        </span>
-                        <GearTagPills tags={move.tags} />
-                      </span>
-                    </div>
-                    <div className="cash-math-figures">
-                      <span
-                        className={`cash-math-delta ${delta >= 0 ? 'in' : 'out'}`}
-                      >
-                        {delta >= 0 ? '+' : '−'}
-                        {formatMoney(Math.abs(delta))}
-                      </span>
-                      <span className="cash-math-run">{formatMoney(after)}</span>
-                    </div>
-                  </li>
-                )
-              })}
-              <li className="cash-math-row cash-math-total">
-                <div className="cash-math-main">
-                  <span className="cash-math-item">Cash on hand</span>
-                </div>
-                <div className="cash-math-figures">
-                  <span
-                    className={`cash-math-run total ${balance >= 0 ? 'good' : 'bad'}`}
-                  >
-                    {formatMoney(balance)}
-                  </span>
-                </div>
-              </li>
-            </ul>
-          ) : null}
-        </div>
+              </div>
+            </li>
+          </ul>
+        ) : null}
 
-        <div className="cash-outlook-card">
-          <span className="stat-label">Inventory & outlook</span>
+        <div className="cash-hero-details">
           {inventorySummary.total === 0 ? (
             <p className="stat-sub cash-inventory-empty">In stock: none</p>
           ) : (
@@ -2716,7 +2713,7 @@ function CashLedger({
             </>
           )}
           <p className="stat-sub cash-inventory-profit">
-            Profit this month (realized):{' '}
+            Profit this month:{' '}
             <span
               className={`cash-inventory-projected-value${
                 monthFlipProfit.profit > 0
