@@ -4704,18 +4704,20 @@ select {
 }
 
 .projected-side {
-  --projected-money-cols: 5.75rem 8rem 5.75rem;
-  --projected-money-gap: 0.65rem 0.85rem;
+  /* Mini-table: Cost | Target sold | Profit — labels above, fixed tracks. */
+  --projected-money-cols: 6.5rem 9.75rem 6.5rem;
+  --projected-money-gap: 0 2.25rem;
   align-items: stretch;
   justify-items: stretch;
-  width: min(100%, 21.2rem);
+  width: min(100%, 30rem);
   min-width: 0;
 }
 
 .projected-figures {
   display: grid;
   grid-template-columns: var(--projected-money-cols);
-  gap: var(--projected-money-gap);
+  column-gap: 2.25rem;
+  row-gap: 0;
   align-items: end;
   width: max-content;
   max-width: 100%;
@@ -4725,7 +4727,8 @@ select {
 .projected-field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  align-items: stretch;
+  gap: 0.3rem;
   margin: 0;
   min-width: 0;
 }
@@ -4733,33 +4736,50 @@ select {
 .projected-field .cash-delta {
   display: block;
   text-align: right;
+  white-space: nowrap;
+  line-height: 1.25;
 }
 
 .projected-field-label {
-  font-size: 0.7rem;
+  display: block;
+  font-size: 0.68rem;
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--ink-muted);
+  white-space: nowrap;
+  line-height: 1.1;
+  text-align: right;
 }
 
 .projected-target-wrap {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
+  padding: 0.15rem 0.4rem;
+  min-height: 1.85rem;
+}
+
+.projected-target-wrap > span {
+  font-size: 1.05rem;
+  line-height: 1.25;
 }
 
 .projected-target-input {
   width: 100%;
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 0.35rem 0.45rem;
+  border: none;
+  border-radius: 0;
+  padding: 0.2rem 0.15rem;
   font: inherit;
-  background: #fff;
+  background: transparent;
   color: var(--ink);
 }
 
 .projected-target-input:focus {
+  outline: none;
+}
+
+.projected-target-wrap:focus-within {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 1px;
 }
@@ -4785,9 +4805,9 @@ select {
 
 .projected-footer {
   display: grid;
-  grid-template-columns: 4px minmax(0, 1fr) min(100%, 21.2rem);
+  grid-template-columns: 4px minmax(0, 1fr) min(100%, 30rem);
   gap: 0.75rem 0.85rem;
-  align-items: baseline;
+  align-items: center;
   margin-top: 0.85rem;
   padding: 0.85rem 0.75rem 0.85rem 0.55rem;
   border-top: 1px solid var(--line);
@@ -4801,16 +4821,15 @@ select {
 }
 
 .projected-footer-figures {
-  --projected-money-cols: 5.75rem 8rem 5.75rem;
-  --projected-money-gap: 0.65rem 0.85rem;
+  --projected-money-cols: 6.5rem 9.75rem 6.5rem;
   grid-column: 3;
   display: grid;
   grid-template-columns: var(--projected-money-cols);
-  gap: var(--projected-money-gap);
+  column-gap: 2.25rem;
   width: max-content;
   max-width: 100%;
   margin-left: auto;
-  align-items: baseline;
+  align-items: center;
 }
 
 .projected-footer-spacer {
@@ -4822,6 +4841,7 @@ select {
   font-variant-numeric: tabular-nums;
   text-align: right;
   justify-self: stretch;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {
@@ -4840,21 +4860,17 @@ select {
   }
 }
 
+/* Keep Cost | Target | Profit on one line; scroll sideways if needed. */
 @media (max-width: 720px) {
   .projected-side {
     width: 100%;
+    overflow-x: auto;
   }
 
   .projected-figures,
   .projected-footer-figures {
-    grid-template-columns: 1fr 1fr;
-    width: 100%;
+    width: max-content;
     margin-left: 0;
-  }
-
-  .projected-field:last-child,
-  .projected-footer-figures strong {
-    grid-column: 1 / -1;
   }
 }
 
