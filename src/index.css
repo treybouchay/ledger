@@ -3389,6 +3389,23 @@ select {
   min-width: 0;
 }
 
+.cash-search-row {
+  display: grid;
+  grid-template-columns: minmax(7.25rem, auto) minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
+.cash-search-row select {
+  width: auto;
+  min-width: 7.25rem;
+}
+
+.cash-search-row input[type='search'] {
+  min-width: 0;
+  width: 100%;
+}
+
 .cash-move.buy-row,
 .cash-move.sell-row {
   background: var(--surface-warm);

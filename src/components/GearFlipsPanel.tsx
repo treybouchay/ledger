@@ -581,6 +581,7 @@ function IconEyeOff() {
 }
 
 type CashDateSort = 'asc' | 'desc'
+type CashSearchScope = 'both' | 'buys' | 'sells'
 
 /** Same priority as status tags on buy rows (keep → sold → listing). */
 type BuyCashTag = 'not_listed' | 'listed' | 'sold' | 'kept'
@@ -1760,6 +1761,8 @@ function CashLedger({
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterItem, setFilterItem] = useState('')
   const [filterSearch, setFilterSearch] = useState('')
+  const [filterSearchScope, setFilterSearchScope] =
+    useState<CashSearchScope>('both')
   const [highlightId, setHighlightId] = useState<string | null>(null)
   const [highlightSourceId, setHighlightSourceId] = useState<string | null>(
     null,
@@ -1849,13 +1852,14 @@ function CashLedger({
 
   const filteredBuys = useMemo(() => {
     const q = filterSearch.trim().toLowerCase()
+    const applySearch = Boolean(q) && filterSearchScope !== 'sells'
     const filtered = buys.filter((move) => {
       if (filterDateFrom) {
         const d = move.date?.slice(0, 10) || ''
         if (!d || d < filterDateFrom) return false
       }
       if (filterItem && normalizeCashItem(move.item) !== filterItem) return false
-      if (q && !cashMoveMatchesSearch(move, q)) return false
+      if (applySearch && !cashMoveMatchesSearch(move, q)) return false
       if (buyTagFilter !== 'all') {
         const tag = buyCashTag(move, moves, excludedBuys)
         if (tag !== buyTagFilter) return false
@@ -1871,25 +1875,48 @@ function CashLedger({
     filterDateFrom,
     filterItem,
     filterSearch,
+    filterSearchScope,
     moves,
   ])
 
   const filteredSells = useMemo(() => {
     const q = filterSearch.trim().toLowerCase()
+    const applySearch = Boolean(q) && filterSearchScope !== 'buys'
     const filtered = sells.filter((move) => {
       if (filterDateFrom) {
         const d = move.date?.slice(0, 10) || ''
         if (!d || d < filterDateFrom) return false
       }
       if (filterItem && normalizeCashItem(move.item) !== filterItem) return false
-      if (q && !cashMoveMatchesSearch(move, q)) return false
+      if (applySearch && !cashMoveMatchesSearch(move, q)) return false
       return true
     })
     return sortCashMovesForDisplay(filtered, sellDateSort)
-  }, [sells, sellDateSort, filterDateFrom, filterItem, filterSearch])
+  }, [
+    sells,
+    sellDateSort,
+    filterDateFrom,
+    filterItem,
+    filterSearch,
+    filterSearchScope,
+  ])
 
-  const filtersActive = Boolean(filterDateFrom || filterItem || filterSearch.trim())
-  const buyFiltersActive = filtersActive || buyTagFilter !== 'all'
+  const filtersActive = Boolean(
+    filterDateFrom ||
+      filterItem ||
+      filterSearch.trim() ||
+      filterSearchScope !== 'both',
+  )
+  const searchAppliesToBuys =
+    Boolean(filterSearch.trim()) && filterSearchScope !== 'sells'
+  const searchAppliesToSells =
+    Boolean(filterSearch.trim()) && filterSearchScope !== 'buys'
+  const buyFiltersActive =
+    Boolean(filterDateFrom || filterItem || searchAppliesToBuys) ||
+    buyTagFilter !== 'all'
+  const sellFiltersActive = Boolean(
+    filterDateFrom || filterItem || searchAppliesToSells,
+  )
   const filteredMoneyOut = sumNullable(filteredBuys.map((m) => m.amount))
   const filteredMoneyIn = sumNullable(filteredSells.map((m) => m.amount))
 
@@ -3019,13 +3046,26 @@ function CashLedger({
             </label>
             <label className="cash-filter-search">
               Search
-              <input
-                type="search"
-                value={filterSearch}
-                onChange={(e) => setFilterSearch(e.target.value)}
-                placeholder="Item, type, amount…"
-                autoComplete="off"
-              />
+              <div className="cash-search-row">
+                <select
+                  aria-label="Search in buys, sells, or both"
+                  value={filterSearchScope}
+                  onChange={(e) =>
+                    setFilterSearchScope(e.target.value as CashSearchScope)
+                  }
+                >
+                  <option value="both">Both</option>
+                  <option value="buys">Only buys</option>
+                  <option value="sells">Only sells</option>
+                </select>
+                <input
+                  type="search"
+                  value={filterSearch}
+                  onChange={(e) => setFilterSearch(e.target.value)}
+                  placeholder="Item, type, amount…"
+                  autoComplete="off"
+                />
+              </div>
             </label>
             {filtersActive ? (
               <button
@@ -3035,6 +3075,7 @@ function CashLedger({
                   setFilterDateFrom('')
                   setFilterItem('')
                   setFilterSearch('')
+                  setFilterSearchScope('both')
                 }}
               >
                 Clear filters
@@ -3088,7 +3129,7 @@ function CashLedger({
                     <h2>Sells</h2>
                     <p>
                       {filteredSells.length}
-                      {filtersActive ? ` of ${sells.length}` : ''} rows ·{' '}
+                      {sellFiltersActive ? ` of ${sells.length}` : ''} rows ·{' '}
                       {formatMoney(filteredMoneyIn)} in
                     </p>
                   </div>
