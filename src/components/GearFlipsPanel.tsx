@@ -1694,7 +1694,7 @@ function ProjectedProfitView({
 
         {filtered.length > 0 ? (
           <div className="projected-footer">
-            <span>
+            <span className="projected-footer-label">
               Month projected profit
               {totals.withTarget < filtered.length
                 ? ` (${totals.withTarget} of ${filtered.length} priced)`
@@ -1703,17 +1703,21 @@ function ProjectedProfitView({
                 ? ` · cash generated ${formatMoney(totals.cashGenerated)}`
                 : ''}
             </span>
-            <strong
-              className={
-                totals.withTarget === 0
-                  ? ''
-                  : totals.profit >= 0
-                    ? 'leftover good'
-                    : 'leftover bad'
-              }
-            >
-              {totals.withTarget === 0 ? '—' : moneyCell(totals.profit)}
-            </strong>
+            <div className="projected-footer-figures">
+              <span className="projected-footer-spacer" />
+              <span className="projected-footer-spacer" />
+              <strong
+                className={
+                  totals.withTarget === 0
+                    ? ''
+                    : totals.profit >= 0
+                      ? 'leftover good'
+                      : 'leftover bad'
+                }
+              >
+                {totals.withTarget === 0 ? '—' : moneyCell(totals.profit)}
+              </strong>
+            </div>
           </div>
         ) : null}
       </section>

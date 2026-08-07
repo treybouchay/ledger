@@ -59,13 +59,14 @@ function IconLearning(props: IconProps) {
   )
 }
 
+/** Hockey goalie mask — Gear flips (replaces cube). */
 function IconGearFlips(props: IconProps) {
   return (
     <NavIcon {...props}>
-      <path d="M12 3.75 4.75 7.5v9L12 20.25 19.25 16.5v-9L12 3.75Z" />
-      <path d="M12 12.25 4.85 8.25" />
-      <path d="M12 12.25v8" />
-      <path d="M12 12.25 19.15 8.25" />
+      <path d="M8 9c0-2.7 1.8-4.75 4-4.75S16 6.3 16 9v4.75c0 1.85-1.05 3.4-2.6 4.1L12 19.15l-1.4-.8C9.05 17.15 8 15.6 8 13.75V9Z" />
+      <path d="M10.15 10.15h3.7M10.15 12.35h3.7M10.15 14.55h3.7" />
+      <path d="M12 9.35v6.4" />
+      <path d="M9.35 16.85c.75.55 1.65.85 2.65.85s1.9-.3 2.65-.85" />
     </NavIcon>
   )
 }
