@@ -3,7 +3,12 @@ import {
   GEAR_MONTHS_SEED,
   GEAR_OPENING_BALANCE,
 } from '../data/gearSeed'
-import { GEAR_KINDS, gearTagsEqual, kindLabel } from './gearTags'
+import {
+  formatGearItemLabel,
+  GEAR_KINDS,
+  gearTagsEqual,
+  kindLabel,
+} from './gearTags'
 import type {
   GearCashMove,
   GearItemTags,
@@ -595,6 +600,18 @@ export function cashGroupEconomics(
   }
 }
 
+export interface RealizedFlipMonthRow {
+  linkGroupId: string
+  /** Display name from sell item / gear tags. */
+  label: string
+  tags: GearItemTags | null
+  sold: number
+  purchased: number
+  profit: number
+  /** Earliest sell date in the month (YYYY-MM-DD). */
+  sellDate: string
+}
+
 export interface RealizedFlipProfitMonth {
   /** Sum of (sell proceeds − linked buy cost) for groups sold this month. */
   profit: number
@@ -604,6 +621,34 @@ export interface RealizedFlipProfitMonth {
   groupCount: number
   /** Sell rows in this month that belong to those groups. */
   sellCount: number
+  /** Per linked flip group sold this month. */
+  flips: RealizedFlipMonthRow[]
+}
+
+function flipRowLabel(
+  buys: GearCashMove[],
+  sells: GearCashMove[],
+): { label: string; tags: GearItemTags | null } {
+  const fromMoves = (moves: GearCashMove[]) => {
+    const labels: string[] = []
+    let tags: GearItemTags | null = null
+    for (const m of moves) {
+      const fromTags = formatGearItemLabel(m.tags)
+      const text = (m.item ?? '').trim() || fromTags
+      if (text && !labels.includes(text)) labels.push(text)
+      if (!tags && m.tags) tags = m.tags
+    }
+    return { labels, tags }
+  }
+  const sellSide = fromMoves(sells)
+  if (sellSide.labels.length) {
+    return { label: sellSide.labels.join(' · '), tags: sellSide.tags }
+  }
+  const buySide = fromMoves(buys)
+  if (buySide.labels.length) {
+    return { label: buySide.labels.join(' · '), tags: buySide.tags }
+  }
+  return { label: 'Untitled', tags: null }
 }
 
 /**
@@ -623,6 +668,7 @@ export function realizedFlipProfitForMonth(
     purchased: 0,
     groupCount: 0,
     sellCount: 0,
+    flips: [],
   }
   if (!/^\d{4}-\d{2}$/.test(monthId)) return empty
 
@@ -640,6 +686,7 @@ export function realizedFlipProfitForMonth(
   let purchased = 0
   let groupCount = 0
   let sellCount = 0
+  const flips: RealizedFlipMonthRow[] = []
 
   for (const sell of sellsInMonth) {
     const groupId = sell.linkGroupId
@@ -647,14 +694,34 @@ export function realizedFlipProfitForMonth(
     seen.add(groupId)
     const stats = cashGroupEconomics(cash, sell)
     if (!stats) continue
-    groupCount += 1
-    sellCount += stats.sells.filter(
+    const monthSells = stats.sells.filter(
       (s) => (s.date?.trim().slice(0, 7) ?? '') === monthId,
-    ).length
+    )
+    groupCount += 1
+    sellCount += monthSells.length
     profit += stats.profit
     sold += stats.sold
     purchased += stats.purchased
+    const { label, tags } = flipRowLabel(stats.buys, stats.sells)
+    const sellDates = monthSells
+      .map((s) => s.date?.trim().slice(0, 10) ?? '')
+      .filter(Boolean)
+      .sort()
+    flips.push({
+      linkGroupId: groupId,
+      label,
+      tags,
+      sold: stats.sold,
+      purchased: stats.purchased,
+      profit: stats.profit,
+      sellDate: sellDates[0] ?? sell.date?.trim().slice(0, 10) ?? '',
+    })
   }
+
+  flips.sort((a, b) => {
+    if (a.sellDate !== b.sellDate) return a.sellDate < b.sellDate ? 1 : -1
+    return a.label.localeCompare(b.label)
+  })
 
   return {
     profit: Math.round(profit * 100) / 100,
@@ -662,6 +729,7 @@ export function realizedFlipProfitForMonth(
     purchased: Math.round(purchased * 100) / 100,
     groupCount,
     sellCount,
+    flips,
   }
 }
 

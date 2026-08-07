@@ -114,6 +114,24 @@ function cashMoveDescLabel(
   return `${dateLabel} · ${itemLabel}`
 }
 
+function shiftMonthId(monthId: string, delta: number): string {
+  const [y, m] = monthId.split('-').map(Number)
+  if (!y || !m) return monthId
+  const d = new Date(y, m - 1 + delta, 1)
+  const yy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${yy}-${mm}`
+}
+
+function formatProfitMonthLabel(monthId: string): string {
+  const [y, m] = monthId.split('-').map(Number)
+  if (!y || !m) return monthId
+  return new Date(y, m - 1, 1).toLocaleString('en-CA', {
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
 function CashMoveDesc({
   item,
   date,
@@ -1752,6 +1770,9 @@ function CashLedger({
   const [editAmount, setEditAmount] = useState('')
   const [editSoldVia, setEditSoldVia] = useState<GearSoldVia | null>(null)
   const [cashMathOpen, setCashMathOpen] = useState(false)
+  const [profitMonthId, setProfitMonthId] = useState(
+    () => new Date().toISOString().slice(0, 7),
+  )
   const [pendingJump, setPendingJump] = useState<{
     id: string
     direction: 'in' | 'out'
@@ -1888,11 +1909,13 @@ function CashLedger({
     () => openInventoryProjectedSummary(moves, keepList, projectedTargets),
     [moves, keepList, projectedTargets],
   )
-  // Cash ledger has no month picker — use current calendar month (YYYY-MM).
-  const profitMonthId = new Date().toISOString().slice(0, 7)
   const monthFlipProfit = useMemo(
     () => realizedFlipProfitForMonth(moves, profitMonthId),
     [moves, profitMonthId],
+  )
+  const profitMonthLabel = useMemo(
+    () => formatProfitMonthLabel(profitMonthId),
+    [profitMonthId],
   )
 
   useEffect(() => {
@@ -2712,10 +2735,15 @@ function CashLedger({
               </p>
             </>
           )}
-          <p className="stat-sub cash-inventory-profit">
-            Profit this month:{' '}
-            <span
-              className={`cash-inventory-projected-value${
+        </div>
+      </div>
+
+      <div className="cash-hero cash-profit-card">
+        <div className="cash-hero-grid cash-profit-header">
+          <div>
+            <span className="stat-label">Profit</span>
+            <div
+              className={`stat-value${
                 monthFlipProfit.profit > 0
                   ? ' good'
                   : monthFlipProfit.profit < 0
@@ -2725,9 +2753,86 @@ function CashLedger({
             >
               {monthFlipProfit.profit > 0 ? '+' : ''}
               {formatMoney(monthFlipProfit.profit)}
-            </span>
-          </p>
+            </div>
+            <p className="stat-sub">
+              Sold {formatMoney(monthFlipProfit.sold)} · Cost{' '}
+              {formatMoney(monthFlipProfit.purchased)}
+              {monthFlipProfit.sellCount > 0
+                ? ` · ${monthFlipProfit.sellCount} sell${
+                    monthFlipProfit.sellCount === 1 ? '' : 's'
+                  }`
+                : ''}
+              {' · '}
+              Linked flips
+            </p>
+          </div>
+          <div
+            className="cash-profit-month-nav"
+            role="group"
+            aria-label="Profit month"
+          >
+            <button
+              type="button"
+              className="cash-date-sort-btn"
+              aria-label="Previous month"
+              onClick={() =>
+                setProfitMonthId((id) => shiftMonthId(id, -1))
+              }
+            >
+              ‹
+            </button>
+            <span className="cash-profit-month-label">{profitMonthLabel}</span>
+            <button
+              type="button"
+              className="cash-date-sort-btn"
+              aria-label="Next month"
+              onClick={() =>
+                setProfitMonthId((id) => shiftMonthId(id, 1))
+              }
+            >
+              ›
+            </button>
+          </div>
         </div>
+
+        {monthFlipProfit.flips.length === 0 ? (
+          <p className="stat-sub cash-profit-empty">
+            No linked sells in {profitMonthLabel}.
+          </p>
+        ) : (
+          <ul className="cash-profit-flips">
+            {monthFlipProfit.flips.map((flip) => (
+              <li key={flip.linkGroupId} className="cash-math-row">
+                <div className="cash-math-main">
+                  <span className="cash-math-item">{flip.label}</span>
+                  <span className="cash-math-meta">
+                    {flip.sellDate ? (
+                      <time dateTime={flip.sellDate}>{flip.sellDate}</time>
+                    ) : null}
+                    <GearTagPills tags={flip.tags} />
+                  </span>
+                </div>
+                <div className="cash-math-figures">
+                  <span className="cash-math-delta muted">
+                    Sold {formatMoney(flip.sold)}
+                  </span>
+                  <span
+                    className={`cash-math-run${
+                      flip.profit > 0
+                        ? ' total good'
+                        : flip.profit < 0
+                          ? ' total bad'
+                          : ''
+                    }`}
+                  >
+                    {flip.profit > 0 ? '+' : flip.profit < 0 ? '−' : ''}
+                    {formatMoney(Math.abs(flip.profit))}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <section className="panel">
@@ -3006,71 +3111,6 @@ function CashLedger({
         </>
       )}
 
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>Running balance</h2>
-            <p>Opening, then each buy/sell by date — description always includes date</p>
-          </div>
-        </div>
-        <ul className="cash-timeline">
-          <li className="cash-move opening-row">
-            <div className="cash-move-main">
-              <div className="cash-move-item">Opening balance</div>
-            </div>
-            <div className="cash-move-figures">
-              <div className="cash-after">{formatMoney(openingBalance)}</div>
-            </div>
-          </li>
-          {timeline.map(({ move, delta, balance: after }) => {
-            const isSell = move.direction === 'in'
-            return (
-              <li
-                key={move.id}
-                id={`cash-move-balance-${move.id}`}
-                className={rowClass(
-                  move,
-                  `cash-move ${isSell ? 'sell-row' : 'buy-row'}`,
-                )}
-                title={pairSummaryLabel(move)}
-                onClick={() => activateRow(move)}
-              >
-                <CashMoveRail tone={isSell ? 'in' : 'out'} />
-                <div className="cash-move-main">
-                  <CashMoveDesc
-                    item={move.item}
-                    date={move.date}
-                    tags={move.tags}
-                  />
-                  <div className="cash-move-meta">
-                    <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
-                      {isSell ? 'Sell' : 'Buy'}
-                    </span>
-                    {isSell && move.soldVia ? (
-                      <span className={`sold-via-pill ${move.soldVia}`}>
-                        {SOLD_VIA.find((s) => s.id === move.soldVia)?.short}
-                      </span>
-                    ) : null}
-                    {renderPairLink(move)}
-                  </div>
-                </div>
-                <div className="cash-move-side">
-                  <div className={`cash-delta ${delta >= 0 ? 'in' : 'out'}`}>
-                    {delta >= 0 ? '+' : '−'}
-                    {formatMoney(Math.abs(delta))}
-                  </div>
-                  <div className="cash-after">
-                    Balance {formatMoney(after)}
-                  </div>
-                  {renderMoveActions(move)}
-                </div>
-                {renderPairSummary(move)}
-                {renderEditSection(move)}
-              </li>
-            )
-          })}
-        </ul>
-      </section>
     </div>
   )
 }

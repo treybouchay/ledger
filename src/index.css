@@ -2980,10 +2980,58 @@ select {
   color: var(--bad);
 }
 
-.cash-inventory-profit {
-  margin-top: 0.1rem;
-  padding-top: 0.45rem;
+.cash-profit-header {
+  align-items: flex-start;
+}
+
+.cash-profit-month-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.cash-profit-month-label {
+  min-width: 8.5rem;
+  text-align: center;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.cash-profit-empty {
+  margin: 0.85rem 0 0;
+  padding-top: 0.75rem;
   border-top: 1px solid var(--line);
+}
+
+.cash-profit-flips {
+  list-style: none;
+  margin: 0.95rem 0 0;
+  padding: 0.75rem 0 0;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: min(22rem, 55vh);
+  overflow: auto;
+}
+
+@media (max-width: 640px) {
+  .cash-profit-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .cash-profit-month-nav {
+    justify-content: space-between;
+  }
+
+  .cash-profit-month-label {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 .cash-on-hand-toggle {
