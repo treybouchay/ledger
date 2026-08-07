@@ -3391,7 +3391,7 @@ select {
 
 .cash-search-row {
   display: grid;
-  grid-template-columns: minmax(7.25rem, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(7.25rem, auto);
   gap: 0.45rem;
   align-items: stretch;
 }

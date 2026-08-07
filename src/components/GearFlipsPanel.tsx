@@ -3047,6 +3047,13 @@ function CashLedger({
             <label className="cash-filter-search">
               Search
               <div className="cash-search-row">
+                <input
+                  type="search"
+                  value={filterSearch}
+                  onChange={(e) => setFilterSearch(e.target.value)}
+                  placeholder="Item, type, amount…"
+                  autoComplete="off"
+                />
                 <select
                   aria-label="Search in buys, sells, or both"
                   value={filterSearchScope}
@@ -3058,13 +3065,6 @@ function CashLedger({
                   <option value="buys">Only buys</option>
                   <option value="sells">Only sells</option>
                 </select>
-                <input
-                  type="search"
-                  value={filterSearch}
-                  onChange={(e) => setFilterSearch(e.target.value)}
-                  placeholder="Item, type, amount…"
-                  autoComplete="off"
-                />
               </div>
             </label>
             {filtersActive ? (
