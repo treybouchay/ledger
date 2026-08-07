@@ -3013,6 +3013,12 @@ select {
   min-width: 0;
 }
 
+.cash-on-hand-toggle .stat-value {
+  font-size: 2.85rem;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
 .cash-on-hand-toggle .stat-sub {
   display: block;
 }
