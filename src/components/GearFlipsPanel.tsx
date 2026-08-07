@@ -2585,7 +2585,7 @@ function CashLedger({
   return (
     <div className="layout">
       {renderLinkModal()}
-      <div className={`cash-hero cash-hero--highlight${cashMathOpen ? ' is-open' : ''}`}>
+      <div className={`cash-hero${cashMathOpen ? ' is-open' : ''}`}>
         <div className="cash-hero-grid">
           <button
             type="button"

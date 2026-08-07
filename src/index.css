@@ -2943,16 +2943,6 @@ select {
   padding: 1.15rem 1.25rem;
 }
 
-.cash-hero--highlight {
-  background: color-mix(in srgb, var(--surface-tint) 55%, #fff);
-  border-color: color-mix(in srgb, var(--good) 28%, var(--line));
-  box-shadow: var(--shadow-soft);
-}
-
-.cash-hero--highlight .stat-label {
-  color: color-mix(in srgb, var(--good) 72%, var(--ink));
-}
-
 .cash-hero-grid {
   display: flex;
   justify-content: space-between;
@@ -2966,7 +2956,7 @@ select {
   gap: 0.35rem;
   margin-top: 0.85rem;
   padding-top: 0.75rem;
-  border-top: 1px solid color-mix(in srgb, var(--good) 18%, var(--line));
+  border-top: 1px solid var(--line);
 }
 
 .cash-hero-details .stat-sub {
@@ -2993,7 +2983,7 @@ select {
 .cash-inventory-profit {
   margin-top: 0.1rem;
   padding-top: 0.45rem;
-  border-top: 1px solid color-mix(in srgb, var(--good) 14%, var(--line));
+  border-top: 1px solid var(--line);
 }
 
 .cash-on-hand-toggle {
