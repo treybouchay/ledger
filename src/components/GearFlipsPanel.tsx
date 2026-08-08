@@ -1783,8 +1783,12 @@ function CashLedger({
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterItem, setFilterItem] = useState('')
   const [filterSearch, setFilterSearch] = useState('')
+  const [filterSearchBuys, setFilterSearchBuys] = useState('')
+  const [filterSearchSells, setFilterSearchSells] = useState('')
   const [filterSearchScope, setFilterSearchScope] =
     useState<CashSearchScope>('both')
+  /** Independent buy vs sell queries (only when scope is Both). */
+  const [searchSplit, setSearchSplit] = useState(false)
   const [highlightId, setHighlightId] = useState<string | null>(null)
   const [highlightSourceId, setHighlightSourceId] = useState<string | null>(
     null,
@@ -1872,16 +1876,26 @@ function CashLedger({
     if (next === 'out') setSoldVia(null)
   }
 
+  const buySearchQuery = searchSplit
+    ? filterSearchBuys
+    : filterSearchScope === 'sells'
+      ? ''
+      : filterSearch
+  const sellSearchQuery = searchSplit
+    ? filterSearchSells
+    : filterSearchScope === 'buys'
+      ? ''
+      : filterSearch
+
   const filteredBuys = useMemo(() => {
-    const q = filterSearch.trim().toLowerCase()
-    const applySearch = Boolean(q) && filterSearchScope !== 'sells'
+    const q = buySearchQuery.trim().toLowerCase()
     const filtered = buys.filter((move) => {
       if (filterDateFrom) {
         const d = move.date?.slice(0, 10) || ''
         if (!d || d < filterDateFrom) return false
       }
       if (filterItem && normalizeCashItem(move.item) !== filterItem) return false
-      if (applySearch && !cashMoveMatchesSearch(move, q)) return false
+      if (q && !cashMoveMatchesSearch(move, q)) return false
       if (buyTagFilter !== 'all') {
         const tag = buyCashTag(move, moves, excludedBuys)
         if (tag !== buyTagFilter) return false
@@ -1890,49 +1904,90 @@ function CashLedger({
     })
     return sortCashMovesForDisplay(filtered, buyDateSort)
   }, [
+    buySearchQuery,
     buys,
     buyDateSort,
     buyTagFilter,
     excludedBuys,
     filterDateFrom,
     filterItem,
-    filterSearch,
-    filterSearchScope,
     moves,
   ])
 
   const filteredSells = useMemo(() => {
-    const q = filterSearch.trim().toLowerCase()
-    const applySearch = Boolean(q) && filterSearchScope !== 'buys'
+    const q = sellSearchQuery.trim().toLowerCase()
     const filtered = sells.filter((move) => {
       if (filterDateFrom) {
         const d = move.date?.slice(0, 10) || ''
         if (!d || d < filterDateFrom) return false
       }
       if (filterItem && normalizeCashItem(move.item) !== filterItem) return false
-      if (applySearch && !cashMoveMatchesSearch(move, q)) return false
+      if (q && !cashMoveMatchesSearch(move, q)) return false
       return true
     })
     return sortCashMovesForDisplay(filtered, sellDateSort)
   }, [
+    sellSearchQuery,
     sells,
     sellDateSort,
     filterDateFrom,
     filterItem,
-    filterSearch,
-    filterSearchScope,
   ])
 
   const filtersActive = Boolean(
     filterDateFrom ||
       filterItem ||
       filterSearch.trim() ||
-      filterSearchScope !== 'both',
+      filterSearchBuys.trim() ||
+      filterSearchSells.trim() ||
+      filterSearchScope !== 'both' ||
+      searchSplit,
   )
-  const searchAppliesToBuys =
-    Boolean(filterSearch.trim()) && filterSearchScope !== 'sells'
-  const searchAppliesToSells =
-    Boolean(filterSearch.trim()) && filterSearchScope !== 'buys'
+  const searchAppliesToBuys = Boolean(buySearchQuery.trim())
+  const searchAppliesToSells = Boolean(sellSearchQuery.trim())
+
+  function enableSearchSplit() {
+    const shared = filterSearch
+    setFilterSearchBuys(shared)
+    setFilterSearchSells(shared)
+    setFilterSearchScope('both')
+    setSearchSplit(true)
+  }
+
+  function combineSearchSplit() {
+    const buysQ = filterSearchBuys.trim()
+    const sellsQ = filterSearchSells.trim()
+    const shared =
+      buysQ && sellsQ && buysQ !== sellsQ
+        ? buysQ
+        : buysQ || sellsQ || filterSearch
+    setFilterSearch(shared)
+    setFilterSearchBuys('')
+    setFilterSearchSells('')
+    setSearchSplit(false)
+  }
+
+  function changeSearchScope(next: CashSearchScope) {
+    if (searchSplit && next !== 'both') {
+      const fromSplit =
+        next === 'buys' ? filterSearchBuys : filterSearchSells
+      setFilterSearch(fromSplit || filterSearch)
+      setFilterSearchBuys('')
+      setFilterSearchSells('')
+      setSearchSplit(false)
+    }
+    setFilterSearchScope(next)
+  }
+
+  function clearCashFilters() {
+    setFilterDateFrom('')
+    setFilterItem('')
+    setFilterSearch('')
+    setFilterSearchBuys('')
+    setFilterSearchSells('')
+    setFilterSearchScope('both')
+    setSearchSplit(false)
+  }
   const buyFiltersActive =
     Boolean(filterDateFrom || filterItem || searchAppliesToBuys) ||
     buyTagFilter !== 'all'
@@ -3076,39 +3131,77 @@ function CashLedger({
                 ))}
               </select>
             </label>
-            <label className="cash-filter-search">
-              Search
-              <div className="cash-search-row">
-                <input
-                  type="search"
-                  value={filterSearch}
-                  onChange={(e) => setFilterSearch(e.target.value)}
-                  placeholder="Item, type, amount…"
-                  autoComplete="off"
-                />
-                <select
-                  aria-label="Search in buys, sells, or both"
-                  value={filterSearchScope}
-                  onChange={(e) =>
-                    setFilterSearchScope(e.target.value as CashSearchScope)
-                  }
+            {searchSplit ? (
+              <div className="cash-filter-search cash-filter-search-split">
+                <label>
+                  Search buys
+                  <input
+                    type="search"
+                    value={filterSearchBuys}
+                    onChange={(e) => setFilterSearchBuys(e.target.value)}
+                    placeholder="Buys: item, type, amount…"
+                    autoComplete="off"
+                  />
+                </label>
+                <label>
+                  Search sells
+                  <input
+                    type="search"
+                    value={filterSearchSells}
+                    onChange={(e) => setFilterSearchSells(e.target.value)}
+                    placeholder="Sells: item, type, amount…"
+                    autoComplete="off"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="ghost compact"
+                  onClick={combineSearchSplit}
+                  title="Use one shared search for buys and sells"
                 >
-                  <option value="both">Both</option>
-                  <option value="buys">Only buys</option>
-                  <option value="sells">Only sells</option>
-                </select>
+                  One search
+                </button>
               </div>
-            </label>
+            ) : (
+              <label className="cash-filter-search">
+                Search
+                <div className="cash-search-row">
+                  <input
+                    type="search"
+                    value={filterSearch}
+                    onChange={(e) => setFilterSearch(e.target.value)}
+                    placeholder="Item, type, amount…"
+                    autoComplete="off"
+                  />
+                  <select
+                    aria-label="Search in buys, sells, or both"
+                    value={filterSearchScope}
+                    onChange={(e) =>
+                      changeSearchScope(e.target.value as CashSearchScope)
+                    }
+                  >
+                    <option value="both">Both</option>
+                    <option value="buys">Only buys</option>
+                    <option value="sells">Only sells</option>
+                  </select>
+                  {filterSearchScope === 'both' ? (
+                    <button
+                      type="button"
+                      className="ghost compact"
+                      onClick={enableSearchSplit}
+                      title="Search buys and sells with different text"
+                    >
+                      Split
+                    </button>
+                  ) : null}
+                </div>
+              </label>
+            )}
             {filtersActive ? (
               <button
                 type="button"
                 className="ghost"
-                onClick={() => {
-                  setFilterDateFrom('')
-                  setFilterItem('')
-                  setFilterSearch('')
-                  setFilterSearchScope('both')
-                }}
+                onClick={clearCashFilters}
               >
                 Clear filters
               </button>
