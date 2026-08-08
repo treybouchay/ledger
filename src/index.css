@@ -5631,6 +5631,21 @@ button.linkish {
   background: color-mix(in srgb, var(--ink-muted) 8%, #fff);
 }
 
+.screenshot-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.65rem;
+  max-width: min(640px, 100%);
+}
+
+.screenshot-preview-grid .screenshot-preview {
+  max-width: none;
+}
+
+.screenshot-preview-grid .screenshot-preview img {
+  max-height: 160px;
+}
+
 .screenshot-preview img {
   display: block;
   width: 100%;
@@ -5638,6 +5653,11 @@ button.linkish {
   max-height: 280px;
   object-fit: contain;
   background: #0f1218;
+}
+
+.review-card-source {
+  font-size: 0.8rem;
+  color: var(--ink-muted);
 }
 
 .upload-box label,

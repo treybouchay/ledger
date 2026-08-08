@@ -11,6 +11,8 @@ export interface ParsedStatementRow {
   isRefund?: boolean
   /** Incoming transfer/payroll — show in review but unchecked by default. */
   likelyDeposit?: boolean
+  /** Screenshot filename (or label) when rows come from multi-image OCR. */
+  sourceLabel?: string
 }
 
 const MONTH =

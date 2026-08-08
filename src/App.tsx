@@ -3386,7 +3386,7 @@ export default function App() {
             <div>
               <h2>Import charges</h2>
               <p>
-                Import from a bank statement or a phone screenshot of your
+                Import from a bank statement or phone screenshots of your
                 activity, check categories, then add them to the ledger
               </p>
             </div>

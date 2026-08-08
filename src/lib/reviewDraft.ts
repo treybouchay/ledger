@@ -18,6 +18,8 @@ export interface ReviewDraftRow {
   matchStatus: MatchStatus
   matchedTransactionId?: string
   matchReason?: string
+  /** Screenshot filename when imported from multi-image OCR. */
+  sourceLabel?: string
 }
 
 export function draftsFromParsed(
@@ -90,6 +92,7 @@ export function draftsFromParsed(
       matchReason: row.likelyDeposit
         ? 'Deposit / transfer in — unchecked by default'
         : match.reason,
+      sourceLabel: row.sourceLabel,
     })
 
     if (included) {

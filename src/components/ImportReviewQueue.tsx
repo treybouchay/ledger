@@ -60,6 +60,10 @@ export function ImportReviewQueue({
   const [bulkCategory, setBulkCategory] = useState<CategoryId | ''>('')
   const [fileName, setFileName] = useState('')
   const [sourceFile, setSourceFile] = useState<File | null>(null)
+  const [sourceFiles, setSourceFiles] = useState<File[]>([])
+  const [parsedRows, setParsedRows] = useState<
+    Parameters<typeof draftsFromParsed>[0]
+  >([])
   const [warning, setWarning] = useState<string | undefined>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,7 +77,7 @@ export function ImportReviewQueue({
   const [sourceKind, setSourceKind] = useState<
     'statement' | 'screenshot' | undefined
   >()
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewUrls, setPreviewUrls] = useState<string[]>([])
 
   const included = useMemo(
     () => drafts.filter((d) => d.included),
@@ -134,35 +138,35 @@ export function ImportReviewQueue({
     nextPerson: PersonId,
     nextAccount: AccountId,
   ) {
+    setParsedRows(rows)
     setDrafts(
       draftsFromParsed(rows, nextPerson, nextAccount, existingTransactions),
     )
   }
 
-  async function onFile(file: File | null) {
+  function revokePreviewUrls(urls: string[]) {
+    for (const url of urls) URL.revokeObjectURL(url)
+  }
+
+  function labelForFiles(files: File[]): string {
+    if (files.length === 0) return ''
+    if (files.length === 1) return files[0].name
+    if (files.length <= 3) return files.map((f) => f.name).join(' + ')
+    return `${files.length} screenshots (${files[0].name} + ${files.length - 1} more)`
+  }
+
+  async function onStatementFile(file: File | null) {
     if (!file) return
-    const asScreenshot = isImageMime(file.type, file.name)
     setBusy(true)
-    setBusyLabel(
-      asScreenshot ? 'Reading screenshot (OCR)…' : 'Reading statement…',
-    )
+    setBusyLabel('Reading statement…')
     setError(null)
     setWarning(undefined)
-    setPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev)
-      return asScreenshot ? URL.createObjectURL(file) : null
+    setPreviewUrls((prev) => {
+      revokePreviewUrls(prev)
+      return []
     })
     try {
-      const result = await parseStatementFile(file, {
-        onOcrProgress: (status, progress) => {
-          const pct = Math.round(progress * 100)
-          setBusyLabel(
-            pct > 0
-              ? `OCR ${pct}% — ${status}`
-              : `Reading screenshot — ${status}`,
-          )
-        },
-      })
+      const result = await parseStatementFile(file)
       const {
         rows,
         warning: parseWarning,
@@ -174,7 +178,8 @@ export function ImportReviewQueue({
 
       setFileName(file.name)
       setSourceFile(file)
-      setSourceKind(kind ?? (asScreenshot ? 'screenshot' : 'statement'))
+      setSourceFiles([file])
+      setSourceKind(kind ?? 'statement')
       setWarning(parseWarning)
       setNeedsLookFilter('all')
 
@@ -195,13 +200,143 @@ export function ImportReviewQueue({
       rebuildDrafts(rows, nextPerson, nextAccount)
     } catch (err) {
       setDrafts([])
+      setParsedRows([])
       setSourceFile(null)
+      setSourceFiles([])
       setSourceKind(undefined)
       setDetectionNote(undefined)
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev)
-        return null
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not read that file. Try CSV if the PDF is a scan, or a clearer screenshot.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onScreenshotFiles(
+    fileList: FileList | File[] | null,
+    mode: 'replace' | 'append' = 'replace',
+  ) {
+    const incoming = Array.from(fileList ?? []).filter((f) =>
+      isImageMime(f.type, f.name),
+    )
+    if (incoming.length === 0) return
+
+    const append = mode === 'append' && sourceKind === 'screenshot'
+    setBusy(true)
+    setError(null)
+    if (!append) setWarning(undefined)
+
+    const total = incoming.length
+    setBusyLabel(
+      total === 1
+        ? 'Reading screenshot (OCR)…'
+        : `Reading screenshots (OCR) 1/${total}…`,
+    )
+
+    try {
+      const collected: Parameters<typeof draftsFromParsed>[0] = []
+      const warnings: string[] = []
+      let detectedPersonId: PersonId | undefined
+      let detectionNoteLocal: string | undefined
+      let suggestedAccountId: AccountId | undefined
+
+      for (let i = 0; i < incoming.length; i += 1) {
+        const file = incoming[i]
+        setBusyLabel(
+          total === 1
+            ? 'Reading screenshot (OCR)…'
+            : `Reading screenshots (OCR) ${i + 1}/${total}…`,
+        )
+        const result = await parseStatementFile(file, {
+          onOcrProgress: (status, progress) => {
+            const pct = Math.round(progress * 100)
+            const prefix =
+              total === 1
+                ? 'Reading screenshot'
+                : `Screenshot ${i + 1}/${total}`
+            setBusyLabel(
+              pct > 0
+                ? `${prefix} — OCR ${pct}% — ${status}`
+                : `${prefix} — ${status}`,
+            )
+          },
+        })
+        collected.push(
+          ...result.rows.map((row) => ({
+            ...row,
+            sourceLabel: row.sourceLabel ?? file.name,
+          })),
+        )
+        if (result.warning) {
+          warnings.push(
+            total === 1 ? result.warning : `${file.name}: ${result.warning}`,
+          )
+        }
+        if (!detectedPersonId && result.detectedPersonId) {
+          detectedPersonId = result.detectedPersonId
+          detectionNoteLocal = result.detectionNote
+        }
+        if (!suggestedAccountId && result.suggestedAccountId) {
+          suggestedAccountId = result.suggestedAccountId
+        }
+      }
+
+      const nextFiles = append ? [...sourceFiles, ...incoming] : incoming
+      const nextRows = append ? [...parsedRows, ...collected] : collected
+      const nextPreviews = nextFiles.map((f) => URL.createObjectURL(f))
+
+      setPreviewUrls((prev) => {
+        revokePreviewUrls(prev)
+        return nextPreviews
       })
+      setSourceFiles(nextFiles)
+      setSourceFile(nextFiles[0] ?? null)
+      setFileName(labelForFiles(nextFiles))
+      setSourceKind('screenshot')
+      setWarning(
+        warnings.length > 0
+          ? warnings.join(' ')
+          : nextFiles.length > 1
+            ? `OCR’d ${nextRows.length} charge${nextRows.length === 1 ? '' : 's'} from ${nextFiles.length} screenshots — review every amount and date.`
+            : undefined,
+      )
+      setNeedsLookFilter('all')
+
+      if (append) {
+        rebuildDrafts(nextRows, personId, defaultAccountId)
+      } else {
+        const nextPerson = detectedPersonId ?? personId
+        const nextAccount = resolveAccountForPerson(
+          suggestedAccountId ?? defaultAccountId,
+          nextPerson,
+        )
+        setPersonId(nextPerson)
+        setDefaultAccountId(nextAccount)
+        if (detectedPersonId) {
+          setPersonSource('detected')
+          setDetectionNote(detectionNoteLocal)
+        } else {
+          setPersonSource('manual')
+          setDetectionNote(undefined)
+        }
+        rebuildDrafts(nextRows, nextPerson, nextAccount)
+      }
+    } catch (err) {
+      if (!append) {
+        setDrafts([])
+        setParsedRows([])
+        setSourceFile(null)
+        setSourceFiles([])
+        setSourceKind(undefined)
+        setDetectionNote(undefined)
+        setPreviewUrls((prev) => {
+          revokePreviewUrls(prev)
+          return []
+        })
+      }
       setError(
         err instanceof Error
           ? err.message
@@ -277,6 +412,7 @@ export function ImportReviewQueue({
         matchReason: rematch.matchReason,
         included:
           rematch.matchStatus === 'duplicate' ? false : row.included,
+        sourceLabel: row.sourceLabel,
       }
     })
   }
@@ -334,17 +470,19 @@ export function ImportReviewQueue({
 
   function clearQueue() {
     setDrafts([])
+    setParsedRows([])
     setFileName('')
     setSourceFile(null)
+    setSourceFiles([])
     setSourceKind(undefined)
     setWarning(undefined)
     setError(null)
     setNeedsLookFilter('all')
     setDetectionNote(undefined)
     setPersonSource('manual')
-    setPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev)
-      return null
+    setPreviewUrls((prev) => {
+      revokePreviewUrls(prev)
+      return []
     })
   }
 
@@ -395,7 +533,13 @@ export function ImportReviewQueue({
       if (!ok) return
     }
     const file = sourceFile
-    const name = fileName || (sourceKind === 'screenshot' ? 'Screenshot' : 'Statement')
+    const name =
+      fileName ||
+      (sourceKind === 'screenshot'
+        ? sourceFiles.length > 1
+          ? `${sourceFiles.length} screenshots`
+          : 'Screenshot'
+        : 'Statement')
     await onCommit(stamped, {
       fileName: name,
       personId,
@@ -422,10 +566,10 @@ export function ImportReviewQueue({
 
       <div className="upload-box">
         <p className="hint">
-          Upload a bank PDF/CSV or a phone screenshot of your activity list.
-          Screenshots use on-device OCR — review every row (you can add or remove
-          rows below). Already-logged charges show as duplicates and stay
-          unchecked.
+          Upload a bank PDF/CSV or phone screenshots of your activity list.
+          Screenshots use on-device OCR — you can select several at once or add
+          more after the first. Review every row (add or remove below).
+          Already-logged charges show as duplicates and stay unchecked.
         </p>
 
         <div className="upload-controls">
@@ -471,25 +615,35 @@ export function ImportReviewQueue({
                 accept={STATEMENT_ACCEPT}
                 disabled={busy}
                 onChange={(e) => {
-                  void onFile(e.target.files?.[0] ?? null)
+                  void onStatementFile(e.target.files?.[0] ?? null)
                   e.target.value = ''
                 }}
               />
             </label>
           </div>
           <div className="import-source-card">
-            <h3>Account screenshot</h3>
+            <h3>Account screenshots</h3>
             <p className="hint">
-              Photo of your activity list — OCR reads charges on-device
+              Photos of your activity list — OCR reads charges on-device.
+              Select multiple, or add more after the first.
             </p>
             <label className="import-file-label">
-              Choose screenshot
+              {sourceKind === 'screenshot' && drafts.length > 0
+                ? 'Add screenshots'
+                : 'Choose screenshots'}
               <input
                 type="file"
                 accept={SCREENSHOT_ACCEPT}
+                multiple
                 disabled={busy}
                 onChange={(e) => {
-                  void onFile(e.target.files?.[0] ?? null)
+                  const files = e.target.files
+                  void onScreenshotFiles(
+                    files,
+                    sourceKind === 'screenshot' && drafts.length > 0
+                      ? 'append'
+                      : 'replace',
+                  )
                   e.target.value = ''
                 }}
               />
@@ -501,16 +655,29 @@ export function ImportReviewQueue({
         {error ? <p className="form-error">{error}</p> : null}
         {warning ? <p className="hint">{warning}</p> : null}
 
-        {previewUrl ? (
-          <div className="screenshot-preview">
-            <img src={previewUrl} alt={`Uploaded ${fileName || 'screenshot'}`} />
+        {previewUrls.length > 0 ? (
+          <div
+            className={
+              previewUrls.length > 1
+                ? 'screenshot-preview-grid'
+                : 'screenshot-preview'
+            }
+          >
+            {previewUrls.map((url, i) => (
+              <div key={url} className="screenshot-preview">
+                <img
+                  src={url}
+                  alt={`Uploaded ${sourceFiles[i]?.name || `screenshot ${i + 1}`}`}
+                />
+              </div>
+            ))}
           </div>
         ) : null}
 
         {drafts.length === 0 && !busy ? (
           <div className="empty-guide embedded">
             <p>
-              Pick a statement or screenshot above to start. Or{' '}
+              Pick a statement or screenshots above to start. Or{' '}
               <button type="button" className="linkish" onClick={addManualRow}>
                 add a row manually
               </button>
@@ -817,6 +984,11 @@ export function ImportReviewQueue({
                         />
                       </label>
 
+                      {row.sourceLabel && sourceFiles.length > 1 ? (
+                        <p className="preview-meta review-card-source">
+                          From {row.sourceLabel}
+                        </p>
+                      ) : null}
                       {row.matchReason ? (
                         <p className="preview-meta review-card-reason">
                           {row.matchReason}

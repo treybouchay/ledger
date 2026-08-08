@@ -8,6 +8,7 @@ import {
   type LearnedRule,
 } from '../lib/learnedRules'
 import { parseStatementFile } from '../lib/parseStatementFile'
+import { isImageMime } from '../lib/statementFiles'
 import type { CategoryId } from '../types'
 
 interface TrainRow {
@@ -37,6 +38,7 @@ export function LearningPanel({
   const [fileName, setFileName] = useState('')
   const [warning, setWarning] = useState<string | undefined>()
   const [busy, setBusy] = useState(false)
+  const [busyLabel, setBusyLabel] = useState('Reading file…')
   const [error, setError] = useState<string | null>(null)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
 
@@ -53,19 +55,63 @@ export function LearningPanel({
     [included],
   )
 
-  async function onFile(file: File | null) {
-    if (!file) return
+  async function onFiles(fileList: FileList | null) {
+    const files = Array.from(fileList ?? [])
+    if (files.length === 0) return
     setBusy(true)
+    setBusyLabel(
+      files.length === 1
+        ? 'Reading file…'
+        : `Reading files 1/${files.length}…`,
+    )
     setError(null)
     setWarning(undefined)
     setSaveMessage(null)
     try {
-      const { rows, warning: parseWarning } = await parseStatementFile(file)
-      setFileName(file.name)
-      setWarning(parseWarning)
+      const allRows: Awaited<
+        ReturnType<typeof parseStatementFile>
+      >['rows'] = []
+      const warnings: string[] = []
+      const imageCount = files.filter((f) =>
+        isImageMime(f.type, f.name),
+      ).length
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i]
+        if (files.length > 1) {
+          setBusyLabel(`Reading files ${i + 1}/${files.length}…`)
+        }
+        const { rows, warning: parseWarning } = await parseStatementFile(file)
+        allRows.push(
+          ...rows.map((row) => ({
+            ...row,
+            sourceLabel: row.sourceLabel ?? file.name,
+          })),
+        )
+        if (parseWarning) {
+          warnings.push(
+            files.length === 1
+              ? parseWarning
+              : `${file.name}: ${parseWarning}`,
+          )
+        }
+      }
+      setFileName(
+        files.length === 1
+          ? files[0].name
+          : imageCount === files.length
+            ? `${files.length} screenshots`
+            : `${files.length} files`,
+      )
+      setWarning(
+        warnings.length > 0
+          ? warnings.join(' ')
+          : files.length > 1
+            ? `Parsed ${allRows.length} row${allRows.length === 1 ? '' : 's'} from ${files.length} files.`
+            : undefined,
+      )
       const stamp = Date.now()
       setDrafts(
-        rows.map((row, i) => {
+        allRows.map((row, i) => {
           const isRefund = row.amount < 0 || row.isRefund === true
           return {
             id: `train-${stamp}-${i}`,
@@ -158,9 +204,9 @@ export function LearningPanel({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Train from a statement or screenshot</h2>
+            <h2>Train from a statement or screenshots</h2>
             <p>
-              Upload a past file or account photo, assign categories, and save
+              Upload a past file or account photos, assign categories, and save
               lessons — nothing is added to the ledger
             </p>
           </div>
@@ -169,23 +215,27 @@ export function LearningPanel({
         <div className="upload-box">
           <p className="hint">
             Same parsers as Import charges (including OCR for screenshots).
-            Assign real categories (not Other), then save so the next import
-            auto-fills better.
+            You can select multiple screenshots at once. Assign real categories
+            (not Other), then save so the next import auto-fills better.
           </p>
 
           <div className="upload-controls">
             <label>
-              Past statement or screenshot
+              Past statement or screenshots
               <input
                 type="file"
                 accept=".csv,.txt,text/csv,text/plain,application/pdf,.pdf,image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+                multiple
                 disabled={busy}
-                onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  void onFiles(e.target.files)
+                  e.target.value = ''
+                }}
               />
             </label>
           </div>
 
-          {busy ? <p className="hint">Reading file…</p> : null}
+          {busy ? <p className="hint">{busyLabel}</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
           {warning ? <p className="hint">{warning}</p> : null}
 
