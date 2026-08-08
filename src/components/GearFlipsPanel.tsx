@@ -12,7 +12,6 @@ import {
   cashGroupOpposites,
   cashLinksChanged,
   cashTimeline,
-  compareCashHistory,
   detachBuyFromProjectedMonth,
   effectiveListingStatus,
   insertCashMoveSorted,
@@ -487,6 +486,27 @@ function IconLedger() {
   )
 }
 
+/** Receipt slip — open cash activity from Cash on hand. */
+function IconReceipt() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      focusable="false"
+    >
+      <path d="M4.25 2.25h7.5v11.5l-1.25-.9-1.25.9-1.25-.9-1.25.9-1.25-.9-1.25.9V2.25Z" />
+      <path d="M6 5.5h4M6 8h4M6 10.5h2.5" />
+    </svg>
+  )
+}
+
 /** Chain / link — link-mode entry (neutral grey via .icon-btn). */
 function IconLink() {
   return (
@@ -554,7 +574,7 @@ function IconKeep() {
   )
 }
 
-function CashMoveRail({ tone }: { tone: 'in' | 'out' }) {
+function CashMoveRail({ tone }: { tone: 'in' | 'out' | 'neutral' }) {
   return <span className={`cash-move-rail ${tone}`} aria-hidden />
 }
 
@@ -1734,6 +1754,7 @@ function CashLedger({
   onChangeOpening,
   onChangeMoves,
   onKeepBuy,
+  onViewReceipt,
 }: {
   openingBalance: number
   moves: GearCashMove[]
@@ -1742,6 +1763,7 @@ function CashLedger({
   onChangeOpening: (n: number) => void
   onChangeMoves: (moves: GearCashMove[]) => void
   onKeepBuy: (move: GearCashMove) => void
+  onViewReceipt: () => void
 }) {
   const [mode, setMode] = useState<'in' | 'out'>('out')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -2641,30 +2663,40 @@ function CashLedger({
       {renderLinkModal()}
       <div className={`cash-hero${cashMathOpen ? ' is-open' : ''}`}>
         <div className="cash-hero-grid">
-          <button
-            type="button"
-            className="cash-on-hand-toggle"
-            aria-expanded={cashMathOpen}
-            aria-controls="cash-on-hand-math"
-            onClick={() => setCashMathOpen((v) => !v)}
-          >
-            <span className="cash-on-hand-toggle-copy">
-              <span className="stat-label">Cash on hand</span>
-              <span className={`stat-value ${balance >= 0 ? 'good' : 'bad'}`}>
-                {formatMoney(balance)}
-              </span>
-              <span className="stat-sub">
-                Opening {formatMoney(openingBalance)} + sold{' '}
-                {formatMoney(moneyIn)} − bought {formatMoney(moneyOut)}
-              </span>
-            </span>
-            <span
-              className={`cash-on-hand-chevron${cashMathOpen ? ' open' : ''}`}
-              aria-hidden
+          <div className="cash-on-hand-block">
+            <button
+              type="button"
+              className="cash-on-hand-toggle"
+              aria-expanded={cashMathOpen}
+              aria-controls="cash-on-hand-math"
+              onClick={() => setCashMathOpen((v) => !v)}
             >
-              ›
-            </span>
-          </button>
+              <span className="cash-on-hand-toggle-copy">
+                <span className="stat-label">Cash on hand</span>
+                <span className={`stat-value ${balance >= 0 ? 'good' : 'bad'}`}>
+                  {formatMoney(balance)}
+                </span>
+                <span className="stat-sub">
+                  Opening {formatMoney(openingBalance)} + sold{' '}
+                  {formatMoney(moneyIn)} − bought {formatMoney(moneyOut)}
+                </span>
+              </span>
+              <span
+                className={`cash-on-hand-chevron${cashMathOpen ? ' open' : ''}`}
+                aria-hidden
+              >
+                ›
+              </span>
+            </button>
+            <button
+              type="button"
+              className="ghost cash-receipt-btn"
+              onClick={onViewReceipt}
+            >
+              <IconReceipt />
+              Receipt
+            </button>
+          </div>
           <label className="cash-opening">
             Opening balance
             <input
@@ -3473,20 +3505,32 @@ function KeepListPanel({
 }
 
 function CashHistory({
+  openingBalance,
   moves,
   onChangeMoves,
+  onBackToCash,
 }: {
+  openingBalance: number
   moves: GearCashMove[]
   onChangeMoves: (moves: GearCashMove[]) => void
+  onBackToCash: () => void
 }) {
   const [kind, setKind] = useState<'all' | 'out' | 'in'>('all')
   const [undone, setUndone] = useState<GearCashMove[]>([])
 
-  const history = useMemo(() => {
-    const list = [...moves].sort(compareCashHistory)
-    if (kind === 'all') return list
-    return list.filter((m) => m.direction === kind)
-  }, [moves, kind])
+  const timeline = useMemo(
+    () => cashTimeline(openingBalance, moves),
+    [openingBalance, moves],
+  )
+
+  const historyRows = useMemo(() => {
+    if (kind === 'all') {
+      return timeline.map(({ move, balance: run }) => ({ move, run }))
+    }
+    return timeline
+      .filter(({ move }) => move.direction === kind)
+      .map(({ move }) => ({ move, run: null as number | null }))
+  }, [timeline, kind])
 
   function undoMove(move: GearCashMove) {
     setUndone((stack) => [move, ...stack].slice(0, 20))
@@ -3514,34 +3558,42 @@ function CashHistory({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Cash history</h2>
-            <p>Oldest first, newest at the bottom — undo a buy or sell here</p>
+            <h2>Cash receipt</h2>
+            <p>
+              Cash out from buys and cash in from sells, by date — with running
+              balance
+            </p>
           </div>
-          <div className="lot-toggles">
-            <button
-              type="button"
-              className={`ghost${kind === 'all' ? ' active-toggle' : ''}`}
-              aria-pressed={kind === 'all'}
-              onClick={() => setKind('all')}
-            >
-              All
+          <div className="cash-receipt-header-actions">
+            <button type="button" className="ghost" onClick={onBackToCash}>
+              ← Cash ledger
             </button>
-            <button
-              type="button"
-              className={`ghost${kind === 'out' ? ' active-toggle' : ''}`}
-              aria-pressed={kind === 'out'}
-              onClick={() => setKind('out')}
-            >
-              Buys
-            </button>
-            <button
-              type="button"
-              className={`ghost${kind === 'in' ? ' active-toggle' : ''}`}
-              aria-pressed={kind === 'in'}
-              onClick={() => setKind('in')}
-            >
-              Sells
-            </button>
+            <div className="lot-toggles">
+              <button
+                type="button"
+                className={`ghost${kind === 'all' ? ' active-toggle' : ''}`}
+                aria-pressed={kind === 'all'}
+                onClick={() => setKind('all')}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                className={`ghost${kind === 'out' ? ' active-toggle' : ''}`}
+                aria-pressed={kind === 'out'}
+                onClick={() => setKind('out')}
+              >
+                Buys
+              </button>
+              <button
+                type="button"
+                className={`ghost${kind === 'in' ? ' active-toggle' : ''}`}
+                aria-pressed={kind === 'in'}
+                onClick={() => setKind('in')}
+              >
+                Sells
+              </button>
+            </div>
           </div>
         </div>
 
@@ -3557,11 +3609,29 @@ function CashHistory({
           </div>
         ) : null}
 
-        {history.length === 0 ? (
+        {historyRows.length === 0 ? (
           <p className="empty-note">No cash moves yet.</p>
         ) : (
           <ul className="cash-timeline cash-history-list">
-            {history.map((move) => {
+            {kind === 'all' ? (
+              <li className="cash-move opening-row">
+                <CashMoveRail tone="neutral" />
+                <div className="cash-move-main">
+                  <div className="cash-move-item">
+                    <span className="cash-move-desc-text">Opening balance</span>
+                  </div>
+                </div>
+                <div className="cash-move-side">
+                  <div className="cash-delta muted">
+                    {formatMoney(openingBalance)}
+                  </div>
+                  <div className="cash-history-run">
+                    {formatMoney(openingBalance)}
+                  </div>
+                </div>
+              </li>
+            ) : null}
+            {historyRows.map(({ move, run }) => {
               const isSell = move.direction === 'in'
               return (
                 <li
@@ -3577,7 +3647,7 @@ function CashHistory({
                     />
                     <div className="cash-move-meta">
                       <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
-                        {isSell ? 'Sell' : 'Buy'}
+                        {isSell ? 'Sell · in' : 'Buy · out'}
                       </span>
                       {isSell && move.soldVia ? (
                         <span className={`sold-via-pill ${move.soldVia}`}>
@@ -3594,6 +3664,9 @@ function CashHistory({
                       {isSell ? '+' : '−'}
                       {formatMoney(move.amount)}
                     </div>
+                    {run != null ? (
+                      <div className="cash-history-run">{formatMoney(run)}</div>
+                    ) : null}
                     <div className="cash-move-actions">
                       <button
                         type="button"
@@ -3638,7 +3711,7 @@ function CashHistory({
                     />
                     <div className="cash-move-meta">
                       <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
-                        {isSell ? 'Sell' : 'Buy'}
+                        {isSell ? 'Sell · in' : 'Buy · out'}
                       </span>
                     </div>
                   </div>
@@ -3856,13 +3929,16 @@ export function GearFlipsPanel({
           }
           onChangeMoves={changeCash}
           onKeepBuy={keepBuy}
+          onViewReceipt={() => setSub('history')}
         />
       ) : null}
 
       {sub === 'history' ? (
         <CashHistory
+          openingBalance={state.openingBalance}
           moves={state.cash}
           onChangeMoves={changeCash}
+          onBackToCash={() => setSub('cash')}
         />
       ) : null}
 

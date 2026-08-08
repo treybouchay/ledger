@@ -3050,6 +3050,40 @@ select {
   min-width: min(100%, 16rem);
 }
 
+.cash-on-hand-block {
+  display: grid;
+  gap: 0.55rem;
+  justify-items: start;
+  min-width: min(100%, 16rem);
+}
+
+.cash-receipt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.cash-receipt-btn svg {
+  flex-shrink: 0;
+}
+
+.cash-receipt-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
+.cash-history-run {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  text-align: right;
+}
+
 .cash-on-hand-toggle:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 3px;
@@ -4586,6 +4620,10 @@ select {
 
 .cash-move-rail.in {
   background: color-mix(in srgb, var(--good) 70%, var(--surface-tint));
+}
+
+.cash-move-rail.neutral {
+  background: color-mix(in srgb, var(--ink-muted) 35%, transparent);
 }
 
 .cash-move-main {
