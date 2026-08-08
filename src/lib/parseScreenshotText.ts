@@ -77,6 +77,14 @@ function isPendingStatusOnly(line: string): boolean {
 }
 
 /**
+ * Amex marks refunds with a standalone “Credit” badge (same slot as Pending).
+ * Never treat that badge as the merchant name.
+ */
+function isCreditStatusOnly(line: string): boolean {
+  return /^(credit|refund|return)\.?$/i.test(line.replace(/\s+/g, ' ').trim())
+}
+
+/**
  * Pending charges sit under the amount (or on the same row). Skip them —
  * they are not posted yet and often OCR worse than settled rows.
  *
@@ -91,6 +99,7 @@ function chargeLooksPending(lines: string[], amountIndex: number): boolean {
   for (let j = amountIndex + 1; j < Math.min(lines.length, amountIndex + 3); j += 1) {
     const next = lines[j]
     if (isPendingStatusOnly(next)) return true
+    if (isCreditStatusOnly(next)) continue
     if (isDateOnlyLine(next) || lineHasAmount(next)) break
     if (isPlausibleMerchant(stripToMerchant(next))) break
   }
@@ -103,6 +112,56 @@ function chargeLooksPending(lines: string[], amountIndex: number): boolean {
   }
 
   return false
+}
+
+/**
+ * Amex screenshots often show refunds as a positive `$12.34` with a nearby
+ * “Credit” badge, or as `-$12.34` / `($12.34)` / `$12.34 CR`.
+ */
+function chargeLooksLikeCredit(lines: string[], amountIndex: number): boolean {
+  const line = lines[amountIndex] ?? ''
+  if (lineAmountLooksLikeCredit(line)) return true
+
+  for (let j = amountIndex + 1; j < Math.min(lines.length, amountIndex + 3); j += 1) {
+    const next = lines[j]
+    if (isCreditStatusOnly(next)) return true
+    if (isPendingStatusOnly(next)) break
+    if (isDateOnlyLine(next) || lineHasAmount(next)) break
+    if (isPlausibleMerchant(stripToMerchant(next))) break
+  }
+
+  if (amountIndex > 0 && isCreditStatusOnly(lines[amountIndex - 1])) {
+    const above = amountIndex >= 2 ? lines[amountIndex - 2] : ''
+    // Previous charge ended with amount then Credit — not this row.
+    if (above && lineHasAmount(above)) return false
+    return true
+  }
+
+  return false
+}
+
+/** Inline credit markers on the amount line itself. */
+function lineAmountLooksLikeCredit(line: string): boolean {
+  const normalized = normalizeMinusGlyphs(line)
+  if (/\(\s*\$?\s*\d{1,3}(?:,\d{3})*\.\d{1,2}\s*\)/.test(normalized)) return true
+  if (/(?:^|[^\d.])-\s*\$?\s*\d{1,3}(?:,\d{3})*\.\d{1,2}\b/.test(normalized)) {
+    return true
+  }
+  if (/(?:\$\s*)?\d{1,3}(?:,\d{3})*\.\d{1,2}\s*CR\b/i.test(normalized)) {
+    return true
+  }
+  // “Credit” / “Refund” on the same row as the amount (not alone as a badge).
+  if (
+    /\b(credit|refund|return)\b/i.test(normalized) &&
+    !isCreditStatusOnly(normalized)
+  ) {
+    return true
+  }
+  return false
+}
+
+function normalizeMinusGlyphs(text: string): string {
+  return text.replace(/[−–—]/g, '-')
 }
 
 /**
@@ -269,26 +328,71 @@ function isPlausibleMerchant(merchant: string): boolean {
   if (m.length < 2) return false
   if (PHONE_LIKE.test(m)) return false
   if (!/[a-z]/i.test(m)) return false
-  if (/^(opening|closing|total|subtotal|balance)$/i.test(m)) return false
+  if (
+    /^(opening|closing|total|subtotal|balance|credit|refund|return|pending)$/i.test(
+      m,
+    )
+  ) {
+    return false
+  }
   return true
 }
 
+/**
+ * Extract amounts; credits are negative (`-$12`, `($12)`, `$12 CR`).
+ * Prefer signed/paren/CR forms so refunds are not read as ordinary charges.
+ */
 function amountsOnLine(line: string): number[] {
-  const cleaned = stripStoreNumbers(stripPhones(line))
-  const dollar = [
-    ...cleaned.matchAll(/\$\s*(\d{1,3}(?:,\d{3})*\.\d{1,2})\b/g),
-  ].map((m) => {
+  const cleaned = normalizeMinusGlyphs(stripStoreNumbers(stripPhones(line)))
+  const found: number[] = []
+  const covered = new Set<number>()
+
+  const take = (start: number, end: number, value: number) => {
+    for (let i = start; i < end; i += 1) {
+      if (covered.has(i)) return
+    }
+    for (let i = start; i < end; i += 1) covered.add(i)
+    const n = Number(Number(value).toFixed(2))
+    if (n !== 0 && Math.abs(n) < 50000) found.push(n)
+  }
+
+  for (const m of cleaned.matchAll(
+    /\(\s*\$?\s*(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*\)/g,
+  )) {
+    if (m.index == null) continue
+    take(m.index, m.index + m[0].length, -Number(m[1].replace(/,/g, '')))
+  }
+
+  for (const m of cleaned.matchAll(
+    /(?<![\d.])-\s*\$?\s*(\d{1,3}(?:,\d{3})*\.\d{1,2})\b/g,
+  )) {
+    if (m.index == null) continue
+    take(m.index, m.index + m[0].length, -Number(m[1].replace(/,/g, '')))
+  }
+
+  for (const m of cleaned.matchAll(
+    /\$\s*(\d{1,3}(?:,\d{3})*\.\d{1,2})\b(?:\s*CR)?/gi,
+  )) {
+    if (m.index == null) continue
     const raw = m[1].replace(/,/g, '')
-    return Number(Number(raw).toFixed(2))
-  })
-  const bare = [...cleaned.matchAll(AMOUNT_PATTERN)]
-    .filter((m) => !m[0].includes('$'))
-    .map((m) => {
-      const raw = stripDollarMisreadAsFive(m[1].replace(/[$,\s]/g, ''), false)
-      return Number(Number(raw).toFixed(2))
-    })
-  const found = dollar.length > 0 ? dollar : bare
-  return [...new Set(found.filter((n) => n !== 0 && Math.abs(n) < 50000))]
+    const n = Number(raw)
+    const credit = /\bCR\s*$/i.test(m[0])
+    take(m.index, m.index + m[0].length, credit ? -n : n)
+  }
+
+  if (found.length === 0) {
+    for (const m of cleaned.matchAll(AMOUNT_PATTERN)) {
+      if (m.index == null || m[0].includes('$')) continue
+      let raw = stripDollarMisreadAsFive(m[1].replace(/[$,\s]/g, ''), false)
+      let n = Number(raw)
+      if (/\bCR\s*$/i.test(m[0]) || /(?<![\d.])-\s*\$?\s*\d/.test(m[0])) {
+        n = -Math.abs(n)
+      }
+      take(m.index, m.index + m[0].length, n)
+    }
+  }
+
+  return [...new Set(found)]
 }
 
 function lineHasAmount(line: string): boolean {
@@ -296,28 +400,28 @@ function lineHasAmount(line: string): boolean {
 }
 
 function stripToMerchant(line: string): string {
-  let merchant = stripStoreNumbers(stripPhones(line))
+  let merchant = normalizeMinusGlyphs(stripStoreNumbers(stripPhones(line)))
   for (const pattern of DATE_PATTERNS) {
     merchant = merchant.replace(pattern, ' ')
   }
   return cleanMerchantName(
     merchant
+      .replace(/\(\s*\$?\s*\d{1,3}(?:,\d{3})*\.\d{1,2}\s*\)/g, ' ')
+      .replace(/(?<![\d.])-\s*\$?\s*\d{1,3}(?:,\d{3})*\.\d{1,2}\b/g, ' ')
       .replace(AMOUNT_PATTERN, ' ')
       .replace(/\$\s*\d{1,3}(?:,\d{3})*\.\d{1,2}\b/g, ' '),
   )
 }
 
 function amountFromLine(line: string, context: string): number | null {
-  const cleaned = stripStoreNumbers(stripPhones(line))
-  const dollar = [
-    ...cleaned.matchAll(/\$\s*(\d{1,3}(?:,\d{3})*\.\d{1,2})\b/g),
-  ].map((m) => Number(Number(m[1].replace(/,/g, '')).toFixed(2)))
+  const cleaned = normalizeMinusGlyphs(stripStoreNumbers(stripPhones(line)))
   const any = amountsOnLine(line)
-  let amount = pickStatementAmount(dollar.length > 0 ? dollar : any)
+  let amount = pickStatementAmount(any)
   if (!amount) return null
 
+  const hadExplicitDollar = /\$/.test(cleaned)
   // Bare OCR amount: `$` often becomes a leading `5`.
-  if (dollar.length === 0) {
+  if (!hadExplicitDollar) {
     const fixed = stripDollarMisreadAsFive(Math.abs(amount).toFixed(2), false)
     if (fixed !== Math.abs(amount).toFixed(2)) {
       amount = amount < 0 ? -Number(fixed) : Number(fixed)
@@ -348,6 +452,11 @@ function amountFromLine(line: string, context: string): number | null {
         return amount < 0 ? -n : n
       }
     }
+  }
+
+  // Positive OCR amount + nearby/inline credit marker → treat as refund.
+  if (amount > 0 && lineAmountLooksLikeCredit(line)) {
+    return -amount
   }
   return amount
 }
@@ -386,6 +495,8 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     const line = lines[i]
     if (SKIP_LINE.test(line)) continue
     if (isPendingStatusOnly(line)) continue
+    // Keep pending merchant; Credit badge is read from neighbors of the amount.
+    if (isCreditStatusOnly(line)) continue
     if (/page\s+\d+/i.test(line)) continue
 
     if (isDateOnlyLine(line)) {
@@ -437,7 +548,9 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     if (!merchant || !isPlausibleMerchant(merchant)) continue
 
     const looksLikeRefund =
-      amount < 0 || /refund|return|rebate|credit|payment\s+thank/i.test(merchant)
+      amount < 0 ||
+      chargeLooksLikeCredit(lines, i) ||
+      /refund|return|rebate|credit|payment\s+thank/i.test(merchant)
 
     rows.push({
       date,
@@ -445,7 +558,7 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
       merchant,
       suggestedCategoryId: suggestCategory(merchant),
       suggestedAccountId: 'other',
-      isRefund: looksLikeRefund || amount < 0,
+      isRefund: looksLikeRefund,
     })
   }
 
@@ -458,6 +571,7 @@ function findMerchantAbove(lines: string[], index: number): string | null {
     const prev = lines[j]
     if (isDateOnlyLine(prev)) break
     if (SKIP_LINE.test(prev) || isPendingStatusOnly(prev)) break
+    if (isCreditStatusOnly(prev)) continue
     if (lineHasAmount(prev)) break
     const m = stripToMerchant(prev)
     if (isPlausibleMerchant(m)) return m

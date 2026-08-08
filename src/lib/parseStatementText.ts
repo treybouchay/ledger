@@ -101,9 +101,31 @@ export function parseStatementText(text: string): ParsedStatementRow[] {
     if (isDateOnlyLine(line)) continue
 
     const date = extractDate(line)
-    const amounts = [...line.matchAll(AMOUNT_PATTERN)].map((m) =>
-      Number(m[1].replace(/[$,\s]/g, '')),
-    )
+    const amounts: number[] = []
+    const covered = new Set<number>()
+    const take = (start: number, end: number, value: number) => {
+      for (let i = start; i < end; i += 1) {
+        if (covered.has(i)) return
+      }
+      for (let i = start; i < end; i += 1) covered.add(i)
+      amounts.push(Number(Number(value).toFixed(2)))
+    }
+
+    // Accounting-style credits: ($12.34)
+    for (const m of line.matchAll(
+      /\(\s*\$?\s*(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*\)/g,
+    )) {
+      if (m.index == null) continue
+      take(m.index, m.index + m[0].length, -Number(m[1].replace(/,/g, '')))
+    }
+
+    for (const m of line.matchAll(AMOUNT_PATTERN)) {
+      if (m.index == null) continue
+      let n = Number(m[1].replace(/[$,\s]/g, ''))
+      // Statement "12.34 CR" / "$12.34 CR" — credit, not a spend.
+      if (/\bCR\s*$/i.test(m[0])) n = -Math.abs(n)
+      take(m.index, m.index + m[0].length, n)
+    }
     if (!date || amounts.length === 0) continue
 
     // Prefer the last money-looking token that isn't a huge balance-like outlier
@@ -121,7 +143,9 @@ export function parseStatementText(text: string): ParsedStatementRow[] {
       merchant = merchant.replace(pattern, ' ')
     }
     merchant = cleanMerchantName(
-      merchant.replace(AMOUNT_PATTERN, ' '),
+      merchant
+        .replace(/\(\s*\$?\s*\d{1,3}(?:,\d{3})*\.\d{1,2}\s*\)/g, ' ')
+        .replace(AMOUNT_PATTERN, ' '),
     )
 
     if (merchant.length < 2) continue
