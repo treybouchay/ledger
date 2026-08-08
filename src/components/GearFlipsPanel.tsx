@@ -600,6 +600,52 @@ function IconEyeOff() {
   )
 }
 
+/** Magnifying glass — cash filter search fields. */
+function IconSearch() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      focusable="false"
+    >
+      <circle cx="7" cy="7" r="4.25" />
+      <path d="M10.5 10.5 13.25 13.25" />
+    </svg>
+  )
+}
+
+function CashSearchField({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+}) {
+  return (
+    <div className="cash-search-field">
+      <span className="cash-search-field-icon">
+        <IconSearch />
+      </span>
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+    </div>
+  )
+}
+
 type CashDateSort = 'asc' | 'desc'
 type CashSearchScope = 'both' | 'buys' | 'sells'
 
@@ -3135,27 +3181,23 @@ function CashLedger({
               <div className="cash-filter-search cash-filter-search-split">
                 <label>
                   Search buys
-                  <input
-                    type="search"
+                  <CashSearchField
                     value={filterSearchBuys}
-                    onChange={(e) => setFilterSearchBuys(e.target.value)}
+                    onChange={setFilterSearchBuys}
                     placeholder="Buys: item, type, amount…"
-                    autoComplete="off"
                   />
                 </label>
                 <label>
                   Search sells
-                  <input
-                    type="search"
+                  <CashSearchField
                     value={filterSearchSells}
-                    onChange={(e) => setFilterSearchSells(e.target.value)}
+                    onChange={setFilterSearchSells}
                     placeholder="Sells: item, type, amount…"
-                    autoComplete="off"
                   />
                 </label>
                 <button
                   type="button"
-                  className="ghost compact"
+                  className="ghost compact cash-filter-action"
                   onClick={combineSearchSplit}
                   title="Use one shared search for buys and sells"
                 >
@@ -3166,12 +3208,10 @@ function CashLedger({
               <label className="cash-filter-search">
                 Search
                 <div className="cash-search-row">
-                  <input
-                    type="search"
+                  <CashSearchField
                     value={filterSearch}
-                    onChange={(e) => setFilterSearch(e.target.value)}
+                    onChange={setFilterSearch}
                     placeholder="Item, type, amount…"
-                    autoComplete="off"
                   />
                   <select
                     aria-label="Search in buys, sells, or both"
@@ -3187,7 +3227,7 @@ function CashLedger({
                   {filterSearchScope === 'both' ? (
                     <button
                       type="button"
-                      className="ghost compact"
+                      className="ghost compact cash-filter-action"
                       onClick={enableSearchSplit}
                       title="Search buys and sells with different text"
                     >
@@ -3200,7 +3240,7 @@ function CashLedger({
             {filtersActive ? (
               <button
                 type="button"
-                className="ghost"
+                className="ghost compact cash-filter-action"
                 onClick={clearCashFilters}
               >
                 Clear filters
