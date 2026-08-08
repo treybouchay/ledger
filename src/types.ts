@@ -280,6 +280,8 @@ export interface GearCashMove {
    * Ignored when the buy is on the keep list; null/undefined displays as not listed.
    */
   listingStatus?: GearListingStatus | null
+  /** Optional free-text note on a buy or sell row. */
+  notes?: string | null
   /** When the row was added to the ledger (ISO). */
   createdAt?: string | null
 }

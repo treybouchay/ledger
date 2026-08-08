@@ -3989,6 +3989,23 @@ select {
   background: var(--accent-soft);
 }
 
+.icon-btn.has-note {
+  color: var(--ink);
+  position: relative;
+}
+
+.icon-btn.has-note::after {
+  content: '';
+  position: absolute;
+  top: 0.28rem;
+  right: 0.28rem;
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, #3d7a6a 80%, #1a4d40);
+  box-shadow: 0 0 0 1.5px #fff;
+}
+
 .icon-btn.danger {
   color: var(--bad);
 }
@@ -4033,7 +4050,8 @@ select {
   padding: 0 0.4rem;
 }
 
-.cash-move.is-editing {
+.cash-move.is-editing,
+.cash-move.is-noting {
   align-items: start;
 }
 
@@ -4063,7 +4081,8 @@ select {
   grid-column: span 2;
 }
 
-.cash-move-edit-fields input {
+.cash-move-edit-fields input,
+.cash-move-edit-fields textarea {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0.45rem 0.55rem;
@@ -5032,12 +5051,47 @@ select {
   margin-top: 0.15rem;
 }
 
-.cash-move.is-editing {
+.cash-move.is-editing,
+.cash-move.is-noting {
   align-items: start;
 }
 
-.cash-move.is-editing .cash-move-edit {
+.cash-move.is-editing .cash-move-edit,
+.cash-move.is-noting .cash-move-notes {
   grid-column: 2 / -1;
+}
+
+.cash-move-notes {
+  display: grid;
+  gap: 0.55rem;
+  padding-top: 0.75rem;
+  margin-top: 0.15rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.cash-move-notes label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
+.cash-notes-input {
+  width: 100%;
+  min-height: 2.6rem;
+  resize: vertical;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.35;
+}
+
+.cash-notes-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--ink-muted) 35%, transparent);
+  outline-offset: 1px;
 }
 
 @media (max-width: 900px) {
@@ -5061,7 +5115,8 @@ select {
     justify-content: flex-start;
   }
 
-  .cash-move.is-editing .cash-move-edit {
+  .cash-move.is-editing .cash-move-edit,
+  .cash-move.is-noting .cash-move-notes {
     grid-column: 2;
   }
 }

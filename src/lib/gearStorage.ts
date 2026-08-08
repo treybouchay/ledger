@@ -473,6 +473,15 @@ function readListingStatus(raw: unknown): GearListingStatus | null {
   return null
 }
 
+function readCashNotes(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+}
+
+function readCashTags(raw: unknown): GearItemTags | null {
+  if (!raw || typeof raw !== 'object') return null
+  return raw as GearItemTags
+}
+
 function migrateLegacyCash(raw: unknown): GearCashMove[] | null {
   if (!Array.isArray(raw)) return null
   const out: GearCashMove[] = []
@@ -489,6 +498,7 @@ function migrateLegacyCash(raw: unknown): GearCashMove[] | null {
         date: (r.date as string | null) ?? null,
         type: String(r.type ?? (r.direction === 'in' ? 'SELL' : 'BUY')),
         item: (r.item as string | null) ?? null,
+        tags: readCashTags(r.tags),
         amount: Math.abs(r.amount),
         direction: r.direction,
         soldVia: r.direction === 'in' ? soldVia : null,
@@ -497,6 +507,7 @@ function migrateLegacyCash(raw: unknown): GearCashMove[] | null {
         linkLocked: readLinkLocked(r.linkLocked),
         listingStatus:
           r.direction === 'out' ? readListingStatus(r.listingStatus) : null,
+        notes: readCashNotes(r.notes),
         createdAt: typeof r.createdAt === 'string' ? r.createdAt : null,
       })
       continue
@@ -513,6 +524,7 @@ function migrateLegacyCash(raw: unknown): GearCashMove[] | null {
       date: (r.date as string | null) ?? null,
       type: String(r.type ?? (direction === 'in' ? 'SELL' : 'BUY')),
       item: (r.item as string | null) ?? null,
+      tags: readCashTags(r.tags),
       amount,
       direction,
       linkGroupId: readLinkGroupId(r.linkGroupId),
@@ -520,6 +532,7 @@ function migrateLegacyCash(raw: unknown): GearCashMove[] | null {
       linkLocked: readLinkLocked(r.linkLocked),
       listingStatus:
         direction === 'out' ? readListingStatus(r.listingStatus) : null,
+      notes: readCashNotes(r.notes),
       createdAt: typeof r.createdAt === 'string' ? r.createdAt : null,
     })
   }

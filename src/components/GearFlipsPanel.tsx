@@ -93,6 +93,7 @@ function cashMoveMatchesSearch(move: GearCashMove, q: string): boolean {
     move.soldVia ?? '',
     move.listingStatus === 'listed' ? 'listed' : '',
     move.listingStatus === 'not_listed' ? 'not listed' : '',
+    move.notes ?? '',
   ]
   return parts.join(' ').toLowerCase().includes(q)
 }
@@ -450,6 +451,28 @@ function IconEdit() {
         fill="currentColor"
         d="M11.13 2.19a1.75 1.75 0 0 1 2.47 2.47L5.9 12.36a1 1 0 0 1-.45.26l-2.7.67a.5.5 0 0 1-.6-.6l.67-2.7a1 1 0 0 1 .26-.45l7.7-7.7Zm1.41 1.06a.75.75 0 0 0-1.06 0L4.3 10.43l-.3 1.22 1.22-.3 7.18-7.18a.75.75 0 0 0 0-1.06ZM3 13.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1 0-1Z"
       />
+    </svg>
+  )
+}
+
+/** Sticky note — open cash-move notes editor. */
+function IconNote() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      focusable="false"
+    >
+      <path d="M3.25 2.75h7.5L12.75 5v8.25H3.25V2.75Z" />
+      <path d="M10.75 2.75V5h2" />
+      <path d="M5.5 7.25h5M5.5 9.5h5M5.5 11.75h3" />
     </svg>
   )
 }
@@ -1848,6 +1871,10 @@ function CashLedger({
   const [editTags, setEditTags] = useState<GearItemTags>(() => emptyGearTags())
   const [editAmount, setEditAmount] = useState('')
   const [editSoldVia, setEditSoldVia] = useState<GearSoldVia | null>(null)
+  const [editNotes, setEditNotes] = useState('')
+  const [notesId, setNotesId] = useState<string | null>(null)
+  const [draftNotes, setDraftNotes] = useState('')
+  const [composeNotes, setComposeNotes] = useState('')
   const [cashMathOpen, setCashMathOpen] = useState(false)
   const [profitMonthId, setProfitMonthId] = useState(
     () => new Date().toISOString().slice(0, 7),
@@ -2100,7 +2127,8 @@ function CashLedger({
   useEffect(() => {
     if (linkingId && !movesById.has(linkingId)) setLinkingId(null)
     if (editingId && !movesById.has(editingId)) setEditingId(null)
-  }, [linkingId, editingId, movesById])
+    if (notesId && !movesById.has(notesId)) setNotesId(null)
+  }, [linkingId, editingId, notesId, movesById])
 
   useEffect(() => {
     if (!linkingId) return
@@ -2142,12 +2170,14 @@ function CashLedger({
 
   function startLink(move: GearCashMove) {
     setEditingId(null)
+    setNotesId(null)
     setSummaryId(null)
     setLinkingId(move.id)
   }
 
   function startEdit(move: GearCashMove) {
     setLinkingId(null)
+    setNotesId(null)
     setSummaryId(null)
     setEditingId(move.id)
     setEditDate(move.date?.slice(0, 10) || '')
@@ -2162,10 +2192,31 @@ function CashLedger({
     )
     setEditAmount(String(move.amount))
     setEditSoldVia(move.soldVia ?? null)
+    setEditNotes(move.notes ?? '')
   }
 
   function cancelEdit() {
     setEditingId(null)
+  }
+
+  function startNotes(move: GearCashMove) {
+    setLinkingId(null)
+    setEditingId(null)
+    setSummaryId(null)
+    setNotesId(move.id)
+    setDraftNotes(move.notes ?? '')
+  }
+
+  function cancelNotes() {
+    setNotesId(null)
+    setDraftNotes('')
+  }
+
+  function saveNotes(move: GearCashMove) {
+    const next = draftNotes.trim() || null
+    patchMove(move.id, { notes: next })
+    setNotesId(null)
+    setDraftNotes('')
   }
 
   function saveEdit(move: GearCashMove) {
@@ -2183,6 +2234,7 @@ function CashLedger({
             tags: { ...editTags },
             amount: n,
             soldVia: m.direction === 'in' ? editSoldVia : null,
+            notes: editNotes.trim() || null,
             // Allow same-name rematch after edits.
             linkLocked: false,
           }
@@ -2217,6 +2269,7 @@ function CashLedger({
   function activateRow(move: GearCashMove) {
     if (linkingFrom) return
     if (editingId) return
+    if (notesId) return
     const opposites = oppositesOf(move)
     if (opposites.length) {
       // Expand summary on this row only — partner stays collapsed.
@@ -2335,6 +2388,7 @@ function CashLedger({
       linkGroupId: null,
       linkedMoveId: null,
       listingStatus: mode === 'out' ? 'not_listed' : null,
+      notes: composeNotes.trim() || null,
       createdAt: new Date().toISOString(),
     }
     let next = autoLinkCashMoves(insertCashMoveSorted(moves, move))
@@ -2344,6 +2398,7 @@ function CashLedger({
     onChangeMoves(next)
     setTags(emptyGearTags())
     setAmount('')
+    setComposeNotes('')
     setMatchKey('')
     setMatchBuyId(null)
     setSellDetailsOpen(false)
@@ -2357,6 +2412,7 @@ function CashLedger({
     if (!ok) return
     if (linkingId === id) setLinkingId(null)
     if (editingId === id) setEditingId(null)
+    if (notesId === id) setNotesId(null)
     if (summaryId === id) setSummaryId(null)
     if (
       highlightId === id ||
@@ -2390,7 +2446,8 @@ function CashLedger({
     const interactive =
       !editingId && isLinked(move) ? ' is-interactive' : ''
     const editing = editingId === move.id ? ' is-editing' : ''
-    return `${base}${flash}${interactive}${editing}`
+    const noting = notesId === move.id ? ' is-noting' : ''
+    return `${base}${flash}${interactive}${editing}${noting}`
   }
 
   function renderMoveActions(move: GearCashMove) {
@@ -2403,6 +2460,8 @@ function CashLedger({
       )
     const isEditing = editingId === move.id
     const isLinking = linkingFrom?.id === move.id
+    const isNotesOpen = notesId === move.id
+    const hasNote = Boolean(move.notes?.trim())
     const isBuy = move.direction === 'out'
     const alreadyKept = isBuy && excludedBuys.has(move.id)
     return (
@@ -2419,6 +2478,28 @@ function CashLedger({
           onClick={() => (isEditing ? cancelEdit() : startEdit(move))}
         >
           {isEditing ? <IconClose /> : <IconEdit />}
+        </button>
+        <button
+          type="button"
+          className={`icon-btn${isNotesOpen ? ' active-toggle' : ''}${hasNote ? ' has-note' : ''}`}
+          aria-pressed={isNotesOpen}
+          title={
+            isNotesOpen
+              ? 'Close notes'
+              : hasNote
+                ? 'View / edit notes'
+                : 'Add notes'
+          }
+          aria-label={
+            isNotesOpen
+              ? 'Close notes'
+              : hasNote
+                ? 'View or edit notes'
+                : 'Add notes'
+          }
+          onClick={() => (isNotesOpen ? cancelNotes() : startNotes(move))}
+        >
+          <IconNote />
         </button>
         {isBuy && !alreadyKept ? (
           <button
@@ -2505,6 +2586,16 @@ function CashLedger({
               />
             </div>
           </label>
+          <label className="span-2">
+            Notes
+            <textarea
+              className="cash-notes-input"
+              rows={2}
+              value={editNotes}
+              onChange={(e) => setEditNotes(e.target.value)}
+              placeholder="Optional"
+            />
+          </label>
         </div>
         <GearItemTagsFields value={editTags} onChange={setEditTags} />
         {move.direction === 'in' ? (
@@ -2536,6 +2627,51 @@ function CashLedger({
             title="Save"
             aria-label="Save"
             disabled={!tagsReady(editTags)}
+          >
+            <IconCheck />
+          </button>
+        </div>
+      </form>
+    )
+  }
+
+  function renderNotesSection(move: GearCashMove) {
+    if (notesId !== move.id) return null
+    return (
+      <form
+        className="cash-move-notes"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault()
+          saveNotes(move)
+        }}
+      >
+        <label>
+          Notes
+          <textarea
+            className="cash-notes-input"
+            rows={3}
+            value={draftNotes}
+            onChange={(e) => setDraftNotes(e.target.value)}
+            placeholder="Optional note for this buy or sell"
+            autoFocus
+          />
+        </label>
+        <div className="cash-move-edit-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            title="Cancel"
+            aria-label="Cancel"
+            onClick={cancelNotes}
+          >
+            <IconClose />
+          </button>
+          <button
+            type="submit"
+            className="icon-btn primary"
+            title="Save notes"
+            aria-label="Save notes"
           >
             <IconCheck />
           </button>
@@ -2614,6 +2750,7 @@ function CashLedger({
         </div>
         {renderPairSummary(move)}
         {renderEditSection(move)}
+        {renderNotesSection(move)}
       </li>
     )
   }
@@ -3132,6 +3269,19 @@ function CashLedger({
               </label>
             </div>
           ) : null}
+
+          <div className="gear-tag-step cash-compose-step">
+            <label className="cash-via-field">
+              Notes
+              <textarea
+                className="cash-notes-input"
+                rows={2}
+                value={composeNotes}
+                onChange={(e) => setComposeNotes(e.target.value)}
+                placeholder="Optional"
+              />
+            </label>
+          </div>
 
           <div className="cash-compose-actions">
             <p className="hint">
@@ -3911,7 +4061,7 @@ export function GearFlipsPanel({
       id: `keep-${Date.now().toString(36)}`,
       item: (move.item ?? '').trim() || 'Untitled',
       tags: move.tags ? { ...move.tags } : null,
-      notes: null,
+      notes: move.notes?.trim() || null,
       date: move.date?.slice(0, 10) ?? null,
       cost: move.amount,
       cashMoveId: move.id,
