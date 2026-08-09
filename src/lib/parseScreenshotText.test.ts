@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict'
 import { parseScreenshotText } from './parseScreenshotText'
+import { draftsFromParsed } from './reviewDraft'
 
 function byMerchant(text: string) {
   return Object.fromEntries(
@@ -123,6 +124,106 @@ $41.10
   const rows = parseScreenshotText(tdSample)
   assert.ok(rows.some((r) => /starbucks/i.test(r.merchant) && !r.isRefund))
   assert.ok(rows.some((r) => /metro/i.test(r.merchant) && !r.isRefund))
+}
+
+// Two Amazon credits on one screenshot — different amounts, both import.
+const twoAmazonDifferent = `
+SimplyCash Preferred Card
+American Express
+
+8 Aug
+AMAZON.COM AMZN.COM/BILL
+Credit
+$42.18
+SEATTLE
+AMAZON.COM AMZN.COM/BILL
+Credit
+$19.99
+SEATTLE
+STARBUCKS #2841
+$7.45
+WHITBY
+`
+
+{
+  const rows = parseScreenshotText(twoAmazonDifferent)
+  const amazons = rows.filter((r) => /amazon/i.test(r.merchant))
+  assert.equal(amazons.length, 2)
+  assert.ok(amazons.every((r) => r.isRefund))
+  assert.deepEqual(
+    amazons.map((r) => r.amount).sort((a, b) => a - b),
+    [19.99, 42.18],
+  )
+  const drafts = draftsFromParsed(rows, 'trevor', 'amex', [])
+  const amazonDrafts = drafts.filter((d) => /amazon/i.test(d.merchant))
+  assert.equal(amazonDrafts.length, 2)
+  assert.ok(amazonDrafts.every((d) => d.included && d.isRefund))
+}
+
+// Credit badge after city subtitle (OCR order) still marks refunds.
+const cityBeforeCredit = `
+SimplyCash Preferred Card
+8 Aug
+AMAZON.COM AMZN.COM/BILL
+$42.18
+SEATTLE
+Credit
+AMAZON.COM AMZN.COM/BILL
+$19.99
+SEATTLE
+Credit
+`
+
+{
+  const rows = parseScreenshotText(cityBeforeCredit)
+  const amazons = rows.filter((r) => /amazon/i.test(r.merchant))
+  assert.equal(amazons.length, 2)
+  assert.ok(amazons.every((r) => r.isRefund))
+}
+
+// Same-amount twin Amazon returns — keep both; draft flags possible, not auto-exclude.
+const twoAmazonSameAmount = `
+SimplyCash Preferred Card
+8 Aug
+AMAZON.COM AMZN.COM/BILL
+Credit
+$29.99
+SEATTLE
+AMAZON.COM AMZN.COM/BILL
+Credit
+$29.99
+SEATTLE
+`
+
+{
+  const rows = parseScreenshotText(twoAmazonSameAmount)
+  assert.equal(rows.length, 2)
+  assert.ok(rows.every((r) => r.isRefund && r.amount === 29.99))
+  const drafts = draftsFromParsed(rows, 'trevor', 'amex', [])
+  assert.equal(drafts.length, 2)
+  assert.ok(drafts.every((d) => d.included))
+  assert.equal(drafts[0].matchStatus, 'new')
+  assert.equal(drafts[1].matchStatus, 'possible')
+}
+
+// Near-amount refunds must not collapse into one.
+const twoAmazonNearAmount = `
+SimplyCash Preferred Card
+8 Aug
+AMAZON.COM AMZN.COM/BILL
+Credit
+$15.80
+SEATTLE
+AMAZON.COM AMZN.COM/BILL
+Credit
+$15.81
+SEATTLE
+`
+
+{
+  const rows = parseScreenshotText(twoAmazonNearAmount)
+  assert.equal(rows.length, 2)
+  assert.ok(rows.every((r) => r.isRefund))
 }
 
 console.log('parseScreenshotText.test.ts: all assertions passed')

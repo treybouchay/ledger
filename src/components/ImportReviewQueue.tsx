@@ -863,6 +863,7 @@ export function ImportReviewQueue({
                         'review-card',
                         !row.included ? 'excluded' : '',
                         flagged ? 'needs-review' : '',
+                        row.isRefund ? 'is-refund' : '',
                         row.matchStatus === 'duplicate' ? 'is-duplicate' : '',
                         row.matchStatus === 'possible' ? 'is-possible' : '',
                       ]

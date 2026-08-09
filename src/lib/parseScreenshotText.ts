@@ -9,6 +9,7 @@ import {
   pickStatementAmount,
   type ParsedStatementRow,
 } from './parseStatementText'
+import { merchantsSimilar } from './duplicates'
 import { suggestCategory } from './parseCsv'
 import { suggestTdAccount } from './parseTd'
 import type { AccountId } from '../types'
@@ -85,6 +86,42 @@ function isCreditStatusOnly(line: string): boolean {
 }
 
 /**
+ * Amex puts city / phone / URL fragments under the amount. Those are not the
+ * next merchant — skip them when hunting for a Credit/Pending badge so
+ * `Amount → SEATTLE → Credit` still counts as a refund.
+ */
+function isLocationOrDetailSubtitle(line: string): boolean {
+  const t = line.replace(/\s+/g, ' ').trim()
+  if (!t) return false
+  if (isCreditStatusOnly(t) || isPendingStatusOnly(t)) return false
+  if (isDateOnlyLine(t) || lineHasAmount(t)) return false
+  if (PHONE_LIKE.test(t)) return true
+  PHONE_IN_TEXT.lastIndex = 0
+  if (PHONE_IN_TEXT.test(t) && !/\$/.test(t)) return true
+  PHONE_IN_TEXT.lastIndex = 0
+  if (/^amzn\.com\b/i.test(t)) return true
+
+  const m = stripToMerchant(t)
+  if (!m || /\d/.test(m) || /\./.test(m)) return false
+
+  const words = m.split(/\s+/).filter(Boolean)
+  if (words.length === 0 || words.length > 3) return false
+  if (!words.every((w) => /^[A-Za-z][A-Za-z'-]*$/.test(w))) return false
+
+  // Single token: city (SEATTLE / WHITBY), not a one-word merchant.
+  if (words.length === 1) {
+    return !/^(nordstrom|starbucks|costco|walmart|target|netflix|spotify|uber|lyft|sobeys|loblaws|amazon|factor|docupet|cursor|metro|apple|google)$/i.test(
+      words[0],
+    )
+  }
+
+  // Multi-word cities only with geographic prefixes — avoid “OLD NAVY”.
+  return /^(san|new|los|las|north|south|east|west|fort|mount|mt|st|saint|santa|sao|rio)\b/i.test(
+    m,
+  )
+}
+
+/**
  * Pending charges sit under the amount (or on the same row). Skip them —
  * they are not posted yet and often OCR worse than settled rows.
  *
@@ -96,11 +133,12 @@ function chargeLooksPending(lines: string[], amountIndex: number): boolean {
   const line = lines[amountIndex] ?? ''
   if (/\bpending\b/i.test(line)) return true
 
-  for (let j = amountIndex + 1; j < Math.min(lines.length, amountIndex + 3); j += 1) {
+  for (let j = amountIndex + 1; j < Math.min(lines.length, amountIndex + 4); j += 1) {
     const next = lines[j]
     if (isPendingStatusOnly(next)) return true
     if (isCreditStatusOnly(next)) continue
     if (isDateOnlyLine(next) || lineHasAmount(next)) break
+    if (isLocationOrDetailSubtitle(next)) continue
     if (isPlausibleMerchant(stripToMerchant(next))) break
   }
 
@@ -122,11 +160,12 @@ function chargeLooksLikeCredit(lines: string[], amountIndex: number): boolean {
   const line = lines[amountIndex] ?? ''
   if (lineAmountLooksLikeCredit(line)) return true
 
-  for (let j = amountIndex + 1; j < Math.min(lines.length, amountIndex + 3); j += 1) {
+  for (let j = amountIndex + 1; j < Math.min(lines.length, amountIndex + 4); j += 1) {
     const next = lines[j]
     if (isCreditStatusOnly(next)) return true
     if (isPendingStatusOnly(next)) break
     if (isDateOnlyLine(next) || lineHasAmount(next)) break
+    if (isLocationOrDetailSubtitle(next)) continue
     if (isPlausibleMerchant(stripToMerchant(next))) break
   }
 
@@ -511,6 +550,8 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     const merchantOnLine = stripToMerchant(line)
 
     if (!amount) {
+      // City / phone under a prior charge must not become the next payee.
+      if (isLocationOrDetailSubtitle(line)) continue
       if (isPlausibleMerchant(merchantOnLine)) {
         pendingMerchant = merchantOnLine
       }
@@ -572,6 +613,7 @@ function findMerchantAbove(lines: string[], index: number): string | null {
     if (isDateOnlyLine(prev)) break
     if (SKIP_LINE.test(prev) || isPendingStatusOnly(prev)) break
     if (isCreditStatusOnly(prev)) continue
+    if (isLocationOrDetailSubtitle(prev)) continue
     if (lineHasAmount(prev)) break
     const m = stripToMerchant(prev)
     if (isPlausibleMerchant(m)) return m
@@ -600,13 +642,18 @@ function parseDateHeaderPairs(text: string): ParsedStatementRow[] {
 }
 
 function dedupeParsed(rows: ParsedStatementRow[]): ParsedStatementRow[] {
-  const seen = new Set<string>()
+  const seen = new Map<string, number>()
   const out: ParsedStatementRow[] = []
   for (const row of rows) {
     if (!isPlausibleMerchant(row.merchant)) continue
-    const key = `${row.date}|${row.amount}|${row.merchant.toLowerCase()}`
-    if (seen.has(key)) continue
-    seen.add(key)
+    const key = `${row.date}|${row.amount}|${row.merchant.toLowerCase()}|${
+      row.isRefund ? 'R' : 'E'
+    }`
+    const prior = seen.get(key) ?? 0
+    // Expenses: exact dedupe across parse paths. Refunds: keep multiples —
+    // two Amazon returns can share merchant + amount on the same day.
+    if (prior > 0 && !row.isRefund) continue
+    seen.set(key, prior + 1)
     const accountId: AccountId = row.suggestedAccountId ?? 'other'
     out.push({
       ...row,
@@ -628,17 +675,36 @@ function preferBestMerchant(rows: ParsedStatementRow[]): ParsedStatementRow[] {
   }
 
   const out: ParsedStatementRow[] = []
-  const used = new Set<string>()
+  const consumedGroups = new Set<string>()
 
   for (const row of rows) {
-    const siblings =
-      byDateAmount.get(`${row.date}|${roundMoney(row.amount)}`) ?? [row]
+    const groupKey = `${row.date}|${roundMoney(row.amount)}`
+    if (consumedGroups.has(groupKey)) continue
+    consumedGroups.add(groupKey)
+
+    const siblings = byDateAmount.get(groupKey) ?? [row]
     const best = siblings.reduce((a, b) =>
       merchantScore(b) > merchantScore(a) ? b : a,
     )
-    const bestKey = `${best.date}|${roundMoney(best.amount)}|${best.merchant.toLowerCase()}`
-    if (used.has(bestKey)) continue
-    used.add(bestKey)
+
+    const refunds = siblings.filter((s) => s.isRefund)
+    // Keep every same-day same-amount refund — do not collapse two returns.
+    if (refunds.length > 1) {
+      for (const r of refunds) {
+        const merchant =
+          merchantScore(r) >= merchantScore(best) ? r.merchant : best.merchant
+        out.push({
+          ...r,
+          merchant,
+          suggestedCategoryId:
+            r.suggestedCategoryId ||
+            best.suggestedCategoryId ||
+            suggestCategory(merchant),
+        })
+      }
+      continue
+    }
+
     out.push(best)
   }
 
@@ -648,6 +714,8 @@ function preferBestMerchant(rows: ParsedStatementRow[]): ParsedStatementRow[] {
 /**
  * OCR often emits the same charge twice with a truncated amount
  * (15.81 vs 15.8) or a junk order-id merchant (CA*5N7Q55BGO).
+ * Do not collapse unrelated merchants, and never merge two exact-amount
+ * refunds (legitimate twin Amazon returns).
  */
 function collapseNearDuplicateCharges(
   rows: ParsedStatementRow[],
@@ -655,9 +723,14 @@ function collapseNearDuplicateCharges(
   const kept: ParsedStatementRow[] = []
 
   for (const row of rows) {
-    const idx = kept.findIndex(
-      (k) => k.date === row.date && amountsNearlySame(k.amount, row.amount),
-    )
+    const idx = kept.findIndex((k) => {
+      if (k.date !== row.date) return false
+      if (!amountsNearlySame(k.amount, row.amount)) return false
+      if (merchantsSimilar(k.merchant, row.merchant) === 'none') return false
+      // Never merge two refunds — twin Amazon returns (even 1¢ apart) must both keep.
+      if (k.isRefund && row.isRefund) return false
+      return true
+    })
     if (idx < 0) {
       kept.push(row)
       continue
@@ -669,6 +742,7 @@ function collapseNearDuplicateCharges(
     kept[idx] = {
       ...winner,
       amount: morePreciseAmount(existing.amount, row.amount),
+      isRefund: Boolean(existing.isRefund || row.isRefund),
       suggestedCategoryId:
         winner.suggestedCategoryId || suggestCategory(winner.merchant),
     }
