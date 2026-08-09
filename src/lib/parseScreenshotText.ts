@@ -30,7 +30,7 @@ const PHONE_IN_TEXT =
  * merchant + amount on the rows below. Carry the date forward.
  */
 export function parseScreenshotText(text: string): ParsedStatementRow[] {
-  const scrubbed = scrubPhoneAmountOcr(text)
+  const scrubbed = scrubPhoneAmountOcr(normalizeCreditAmountGlyphs(text))
   const fromSections = parseSectionedActivity(scrubbed)
 
   // Sectioned parse is authoritative when it finds charges. Aggressive
@@ -95,9 +95,17 @@ function isLocationOrDetailSubtitle(line: string): boolean {
   if (!t) return false
   if (isCreditStatusOnly(t) || isPendingStatusOnly(t)) return false
   if (isDateOnlyLine(t) || lineHasAmount(t)) return false
+  // Pure phone / digits — Amex puts these under the payee.
   if (PHONE_LIKE.test(t)) return true
   PHONE_IN_TEXT.lastIndex = 0
-  if (PHONE_IN_TEXT.test(t) && !/\$/.test(t)) return true
+  if (PHONE_IN_TEXT.test(t) && !/\$/.test(t)) {
+    PHONE_IN_TEXT.lastIndex = 0
+    // `AMZN MKTP CA 866-216-1072` is the payee row, not a subtitle.
+    // Only phone-only (or phone + junk) lines are location details.
+    const withoutPhone = stripPhones(t)
+    if (!withoutPhone || !isPlausibleMerchant(withoutPhone)) return true
+    return false
+  }
   PHONE_IN_TEXT.lastIndex = 0
   if (/^amzn\.com\b/i.test(t)) return true
 
@@ -200,7 +208,18 @@ function lineAmountLooksLikeCredit(line: string): boolean {
 }
 
 function normalizeMinusGlyphs(text: string): string {
-  return text.replace(/[−–—]/g, '-')
+  return text.replace(/[−–—―‒‾˗]/g, '-')
+}
+
+/**
+ * Amex green −$ amounts often OCR as a stray glyph before the dollars
+ * (`~$41.19`, `=$41.19`, `_$41.19`) once the minus washes out.
+ */
+function normalizeCreditAmountGlyphs(text: string): string {
+  return normalizeMinusGlyphs(text).replace(
+    /[~≈=_|]\s*(\$\s*\d{1,3}(?:,\d{3})*\.\d{1,2})\b/g,
+    '-$1',
+  )
 }
 
 /**

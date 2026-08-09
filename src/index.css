@@ -5862,15 +5862,22 @@ button.linkish {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #e8a87c 45%, var(--line));
 }
 
-/* Soft mint — money-in, distinct from expense / needs-review cards. */
+/*
+ * Soft amber + left accent — money-in / refund, distinct from mint page chrome
+ * (--bg / --surface-tint) and from warm peach needs-review expense cards.
+ */
 .review-card.is-refund {
-  background: color-mix(in srgb, var(--surface-tint) 58%, #fff);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--good) 32%, var(--line));
+  background: color-mix(in srgb, #f3e6c8 62%, #fff);
+  box-shadow:
+    inset 3px 0 0 #c9a227,
+    inset 0 0 0 1px color-mix(in srgb, #c9a227 42%, var(--line));
 }
 
 .review-card.is-refund.needs-review {
-  background: color-mix(in srgb, var(--surface-tint) 48%, #fff7f2 30%, #fff);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--good) 28%, #e8a87c 35%);
+  background: color-mix(in srgb, #f3e6c8 48%, #fff7f2 28%, #fff);
+  box-shadow:
+    inset 3px 0 0 #c9a227,
+    inset 0 0 0 1px color-mix(in srgb, #c9a227 35%, #e8a87c 40%);
 }
 
 .review-card.is-duplicate {
@@ -5882,7 +5889,9 @@ button.linkish {
 }
 
 .review-card.is-refund.is-possible {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--good) 25%, #c9a227 40%);
+  box-shadow:
+    inset 3px 0 0 #c9a227,
+    inset 0 0 0 1px color-mix(in srgb, #c9a227 45%, #a67c00 25%);
 }
 
 .review-card-top {
@@ -6179,8 +6188,8 @@ button.linkish {
 }
 
 .tx-row.is-refund {
-  background: color-mix(in srgb, var(--surface-tint) 62%, #fff);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--good) 22%, transparent);
+  background: color-mix(in srgb, #f3e6c8 55%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #c9a227 28%, transparent);
 }
 
 .tx-row.is-editing {
@@ -6199,7 +6208,7 @@ button.linkish {
 }
 
 .tx-rail.in {
-  background: color-mix(in srgb, var(--good) 70%, var(--surface-tint));
+  background: color-mix(in srgb, #c9a227 75%, #f3e6c8);
 }
 
 .tx-main {

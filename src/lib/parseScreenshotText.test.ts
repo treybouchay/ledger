@@ -226,4 +226,113 @@ SEATTLE
   assert.ok(rows.every((r) => r.isRefund))
 }
 
+// Real Amex SimplyCash layout: twin AMZN MKTP CA credits with unicode minus
+// (−$41.19 and −$29.37) plus spends — five posted rows (Pending skipped).
+const amexAug6TwinAmazonReturns = `
+SimplyCash Preferred Card
+American Express
+
+6 Aug
+TIM HORTONS
+$9.13
+Pending
+AMZN MKTP CA 866-216-1072
+−$41.19
+AMZN MKTP CA 866-216-1072
+−$29.37
+OPENAI CHATGPT SUBSCR
+SAN FRANCISCO
+$32.61
+PETRO-CANADA 65696 WHITBY
+$15.80
+PETRO-CANADA 65696 WHITBY
+$65.06
+`
+
+{
+  const rows = parseScreenshotText(amexAug6TwinAmazonReturns)
+  assert.equal(rows.length, 5, `expected 5 posted, got ${rows.length}`)
+  const amazons = rows.filter((r) => /amzn/i.test(r.merchant))
+  assert.equal(amazons.length, 2)
+  assert.ok(amazons.every((r) => r.isRefund))
+  assert.deepEqual(
+    amazons.map((r) => r.amount).sort((a, b) => a - b),
+    [29.37, 41.19],
+  )
+  assert.ok(rows.some((r) => /openai/i.test(r.merchant) && r.amount === 32.61))
+  const petros = rows.filter((r) => /petro/i.test(r.merchant))
+  assert.equal(petros.length, 2)
+  assert.ok(rows.every((r) => !/tim\s*hort/i.test(r.merchant)))
+  const drafts = draftsFromParsed(rows, 'trevor', 'amex', [])
+  assert.equal(drafts.filter((d) => d.included).length, 5)
+}
+
+// Same-line merchant + phone + unicode-minus credit (OCR often flattens rows).
+const amexInlineTwinAmazon = `
+SimplyCash Preferred Card
+6 Aug
+TIM HORTONS $9.13 Pending
+AMZN MKTP CA 866-216-1072 −$41.19
+AMZN MKTP CA 866-216-1072 −$29.37
+OPENAI CHATGPT SUBSCR SAN FRANCISCO $32.61
+PETRO-CANADA 65696 WHITBY $15.80
+PETRO-CANADA 65696 WHITBY $65.06
+`
+
+{
+  const rows = parseScreenshotText(amexInlineTwinAmazon)
+  assert.equal(rows.length, 5)
+  const amazons = rows.filter((r) => /amzn/i.test(r.merchant))
+  assert.equal(amazons.length, 2)
+  assert.deepEqual(
+    amazons.map((r) => r.amount).sort((a, b) => a - b),
+    [29.37, 41.19],
+  )
+  assert.ok(amazons.every((r) => r.isRefund))
+}
+
+// OCR often replaces a washed-out minus with ~ / = / _ before $credits.
+const amexGlyphMinusCredits = `
+SimplyCash Preferred Card
+6 Aug
+AMZN MKTP CA 866-216-1072
+~$41.19
+AMZN MKTP CA 866-216-1072
+=$29.37
+OPENAI CHATGPT SUBSCR SAN FRANCISCO $32.61
+`
+
+{
+  const rows = parseScreenshotText(amexGlyphMinusCredits)
+  const amazons = rows.filter((r) => /amzn/i.test(r.merchant))
+  assert.equal(amazons.length, 2)
+  assert.ok(amazons.every((r) => r.isRefund))
+  assert.deepEqual(
+    amazons.map((r) => r.amount).sort((a, b) => a - b),
+    [29.37, 41.19],
+  )
+}
+
+// Phone-only subtitle under the payee must still allow Credit detection.
+const phoneOnlySubtitleCredit = `
+SimplyCash Preferred Card
+8 Aug
+AMAZON.COM AMZN.COM/BILL
+$42.18
+866-216-1072
+Credit
+SEATTLE
+STARBUCKS #2841
+$7.45
+WHITBY
+`
+
+{
+  const rows = parseScreenshotText(phoneOnlySubtitleCredit)
+  const amazon = rows.find((r) => /amazon/i.test(r.merchant))
+  assert.ok(amazon)
+  assert.equal(amazon!.isRefund, true)
+  assert.equal(amazon!.amount, 42.18)
+}
+
 console.log('parseScreenshotText.test.ts: all assertions passed')

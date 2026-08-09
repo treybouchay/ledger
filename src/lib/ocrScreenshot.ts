@@ -1,5 +1,3 @@
-import { createWorker, PSM } from 'tesseract.js'
-
 /**
  * Client-side OCR for phone banking screenshots. Text feeds the same
  * statement parsers as PDF/CSV. Expect imperfect amounts — review queue is
@@ -7,7 +5,14 @@ import { createWorker, PSM } from 'tesseract.js'
  *
  * Dark-mode bank apps (white on navy) are inverted + upscaled before OCR so
  * Tesseract sees black text on white.
+ *
+ * Amex credits are green (`−$41.19`). Standard luma turns that green into
+ * mid-gray that contrast-stretch then washes out — twin Amazon returns lose
+ * one amount. We gray with R/B (ignore G) and further darken green-chroma
+ * pixels so credit amounts stay ink-dark.
  */
+import { createWorker, PSM } from 'tesseract.js'
+
 export async function extractTextFromImage(
   file: File | Blob,
   onProgress?: (status: string, progress: number) => void,
@@ -41,6 +46,58 @@ export async function extractTextFromImage(
   }
 }
 
+/**
+ * Map one sRGB pixel to OCR gray. Exported for unit tests.
+ * Green Amex credit ink → near-black; mint/white chrome stays light.
+ */
+export function rgbaToOcrGray(r: number, g: number, b: number): number {
+  // Ignore G so saturated credit-green does not lift into mid-gray.
+  let y = 0.5 * r + 0.5 * b
+  const greenness = g - (r + b) / 2
+  if (greenness > 10) {
+    y = Math.max(0, y - greenness * 2.2)
+  }
+  return y
+}
+
+/** Mutates ImageData in place: grayscale + invert-if-dark + contrast. */
+export function processImageDataForOcr(imageData: ImageData): void {
+  const { data } = imageData
+  let lumaSum = 0
+  const pixels = data.length / 4
+  const gray = new Float32Array(pixels)
+  const wasCreditGreen = new Uint8Array(pixels)
+
+  for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+    const r = data[i]
+    const g = data[i + 1]
+    const b = data[i + 2]
+    const greenness = g - (r + b) / 2
+    // Mark Amex-style credit ink before invert so we can re-ink afterward.
+    if (greenness > 10 && g > r + 8 && g > b + 5) {
+      wasCreditGreen[p] = 1
+    }
+    const y = rgbaToOcrGray(r, g, b)
+    gray[p] = y
+    lumaSum += y
+  }
+
+  const avg = lumaSum / pixels
+  const invert = avg < 128
+
+  for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+    let y = gray[p]
+    if (invert) y = 255 - y
+    // After invert, former green credits would flip to white — force ink.
+    if (wasCreditGreen[p]) {
+      y = Math.min(y, 28)
+    }
+    y = (y - 128) * 1.45 + 128
+    y = Math.max(0, Math.min(255, y))
+    data[i] = data[i + 1] = data[i + 2] = y
+  }
+}
+
 async function prepareImageForOcr(file: File | Blob): Promise<Blob> {
   if (typeof createImageBitmap !== 'function') return file
 
@@ -64,22 +121,7 @@ async function prepareImageForOcr(file: File | Blob): Promise<Blob> {
     bitmap.close()
 
     const imageData = ctx.getImageData(0, 0, width, height)
-    const { data } = imageData
-    let lumaSum = 0
-    const pixels = data.length / 4
-    for (let i = 0; i < data.length; i += 4) {
-      lumaSum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
-    }
-    const avg = lumaSum / pixels
-    const invert = avg < 128
-
-    for (let i = 0; i < data.length; i += 4) {
-      let y = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
-      if (invert) y = 255 - y
-      y = (y - 128) * 1.45 + 128
-      y = Math.max(0, Math.min(255, y))
-      data[i] = data[i + 1] = data[i + 2] = y
-    }
+    processImageDataForOcr(imageData)
 
     ctx.putImageData(imageData, 0, 0)
     const blob = await new Promise<Blob | null>((resolve) =>
