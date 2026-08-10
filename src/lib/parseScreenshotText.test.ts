@@ -374,4 +374,32 @@ $65.06
   assert.ok(drafts.filter((d) => /amzn/i.test(d.merchant)).every((d) => d.isRefund))
 }
 
+// Real Amex OCR often loses Tim Hortons' amount (`Dele`) so Pending sits
+// alone above the first Amazon — must not steal that posted refund.
+const amexOrphanedPendingStealsAmazon = `
+SimplyCash Preferred Card
+6 Aug
+TIM HORTONS                           Dele
+Pending
+AMZN MKTP CA 866-216-1072           -$41.19
+AMZN MKTP CA 866-216-1072                -$29.37
+OPENAI *CHATGPT SUBSCR SAN              $32.61
+FRANCISCO
+PETRO-CANADA 65036 WHITBY               $15.80
+PETRO-CANADA 65036 WHITBY               $65.06
+`
+
+{
+  const rows = parseScreenshotText(amexOrphanedPendingStealsAmazon)
+  assert.equal(rows.length, 5, `expected 5 posted, got ${rows.length}`)
+  const amazons = rows.filter((r) => /amzn/i.test(r.merchant))
+  assert.equal(amazons.length, 2, 'orphaned Pending must not drop first Amazon')
+  assert.ok(amazons.every((r) => r.isRefund))
+  assert.deepEqual(
+    amazons.map((r) => r.amount).sort((a, b) => a - b),
+    [29.37, 41.19],
+  )
+  assert.ok(rows.every((r) => !/tim\s*hort/i.test(r.merchant)))
+}
+
 console.log('parseScreenshotText.test.ts: all assertions passed')

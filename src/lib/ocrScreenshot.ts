@@ -6,11 +6,12 @@
  * Dark-mode bank apps (white on navy) are inverted + upscaled before OCR so
  * Tesseract sees black text on white.
  *
- * Amex credits are green (`−$41.19`). Standard luma turns that green into
+ * Amex credits are green (`−$41.19`), and Amex often paints the *whole* credit
+ * row green (merchant + phone + amount). Standard luma turns that green into
  * mid-gray that washes out. We gray with R/B (ignore G) and darken green
  * chroma so digits stay ink-dark — but the thin minus often still disappears.
- * Before OCR we ink a bold ASCII `-` just left of each green amount cluster
- * so credits survive as `-$41.19` for the refund parser.
+ * Before OCR we ink a bold ASCII `-` just left of each rightmost green amount
+ * cluster so credits survive as `-$41.19` for the refund parser.
  */
 import { createWorker, PSM } from 'tesseract.js'
 
@@ -72,6 +73,10 @@ export function rgbaToOcrGray(r: number, g: number, b: number): number {
 /**
  * Find left edges of green amount clusters (typically right-aligned credits).
  * Returns anchors where a minus should be inked.
+ *
+ * Amex paints the *whole* credit row green (merchant + phone + −$amount).
+ * Bucket by line, then take the rightmost amount-sized X-cluster so merchant
+ * ink does not inflate the band past the width gate.
  */
 export function findGreenCreditAnchors(
   colorData: Uint8ClampedArray,
@@ -80,10 +85,18 @@ export function findGreenCreditAnchors(
 ): Array<{ x: number; y: number }> {
   // Bucket green pixels into horizontal bands (~one text line).
   const bandH = Math.max(6, Math.round(height * 0.012))
-  type Band = { minX: number; maxX: number; minY: number; maxY: number; n: number }
+  type Band = {
+    /** column → hit count within this band */
+    cols: Map<number, number>
+    minY: number
+    maxY: number
+    n: number
+  }
   const bands = new Map<number, Band>()
 
-  const xMin = Math.floor(width * 0.35) // amounts sit on the right half
+  // Scan past mid-left chrome; amounts are right-aligned but merchant green
+  // often continues well past 35% width on Amex credit rows.
+  const xMin = Math.floor(width * 0.25)
   for (let y = 0; y < height; y += 1) {
     for (let x = xMin; x < width; x += 1) {
       const i = (y * width + x) * 4
@@ -93,10 +106,14 @@ export function findGreenCreditAnchors(
       const key = Math.floor(y / bandH)
       const b = bands.get(key)
       if (!b) {
-        bands.set(key, { minX: x, maxX: x, minY: y, maxY: y, n: 1 })
+        bands.set(key, {
+          cols: new Map([[x, 1]]),
+          minY: y,
+          maxY: y,
+          n: 1,
+        })
       } else {
-        b.minX = Math.min(b.minX, x)
-        b.maxX = Math.max(b.maxX, x)
+        b.cols.set(x, (b.cols.get(x) ?? 0) + 1)
         b.minY = Math.min(b.minY, y)
         b.maxY = Math.max(b.maxY, y)
         b.n += 1
@@ -104,15 +121,50 @@ export function findGreenCreditAnchors(
     }
   }
 
+  const gapMerge = Math.max(8, Math.round(width * 0.02))
   const anchors: Array<{ x: number; y: number }> = []
   for (const b of bands.values()) {
-    const bw = b.maxX - b.minX + 1
     const bh = b.maxY - b.minY + 1
-    // Amount glyphs: wide-ish run, not a speck / not a huge green panel.
-    if (b.n < 18 || bw < 12 || bw > width * 0.45 || bh < 4 || bh > bandH * 3) {
-      continue
+    if (b.n < 18 || bh < 4 || bh > bandH * 3) continue
+
+    const xs = [...b.cols.keys()].sort((a, c) => a - c)
+    if (xs.length === 0) continue
+
+    // Contiguous column runs → merge digit-sized gaps into clusters.
+    type Cluster = { minX: number; maxX: number; n: number }
+    const clusters: Cluster[] = []
+    let cur: Cluster = {
+      minX: xs[0],
+      maxX: xs[0],
+      n: b.cols.get(xs[0]) ?? 0,
     }
-    const cx = Math.max(2, b.minX - Math.max(6, Math.round(bh * 0.7)))
+    for (let i = 1; i < xs.length; i += 1) {
+      const x = xs[i]
+      const hits = b.cols.get(x) ?? 0
+      if (x - cur.maxX <= gapMerge) {
+        cur.maxX = x
+        cur.n += hits
+      } else {
+        clusters.push(cur)
+        cur = { minX: x, maxX: x, n: hits }
+      }
+    }
+    clusters.push(cur)
+
+    // Amount glyphs sit on the right; ignore left merchant/phone green.
+    const amountish = clusters.filter((c) => {
+      const bw = c.maxX - c.minX + 1
+      return (
+        c.n >= 12 &&
+        bw >= 10 &&
+        bw <= width * 0.35 &&
+        c.minX >= width * 0.45
+      )
+    })
+    if (amountish.length === 0) continue
+
+    const amount = amountish.reduce((a, c) => (c.maxX > a.maxX ? c : a))
+    const cx = Math.max(2, amount.minX - Math.max(6, Math.round(bh * 0.7)))
     const cy = Math.round((b.minY + b.maxY) / 2)
     anchors.push({ x: cx, y: cy })
   }
@@ -123,8 +175,11 @@ export function findGreenCreditAnchors(
   for (const a of anchors) {
     const prev = merged[merged.length - 1]
     if (prev && Math.abs(prev.y - a.y) <= bandH) {
-      prev.x = Math.min(prev.x, a.x)
-      prev.y = Math.round((prev.y + a.y) / 2)
+      // Prefer the rightmost amount when two bands share a line.
+      if (a.x > prev.x) {
+        prev.x = a.x
+        prev.y = Math.round((prev.y + a.y) / 2)
+      }
       continue
     }
     merged.push({ ...a })

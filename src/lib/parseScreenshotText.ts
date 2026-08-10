@@ -154,6 +154,10 @@ function chargeLooksPending(lines: string[], amountIndex: number): boolean {
     const above = amountIndex >= 2 ? lines[amountIndex - 2] : ''
     // Previous charge ended with amount then Pending — not this row.
     if (above && lineHasAmount(above)) return false
+    // OCR often loses the prior amount (`TIM HORTONS` → `Dele`) so Pending
+    // sits alone above the *next* payee. A line that already names its own
+    // merchant is a new charge — do not inherit that orphaned Pending.
+    if (isPlausibleMerchant(stripToMerchant(line))) return false
     return true
   }
 
@@ -181,6 +185,8 @@ function chargeLooksLikeCredit(lines: string[], amountIndex: number): boolean {
     const above = amountIndex >= 2 ? lines[amountIndex - 2] : ''
     // Previous charge ended with amount then Credit — not this row.
     if (above && lineHasAmount(above)) return false
+    // Same orphaned-badge case as Pending: next payee names itself.
+    if (isPlausibleMerchant(stripToMerchant(line))) return false
     return true
   }
 

@@ -142,6 +142,43 @@ function makeImageData(
   }
 }
 
+// Amex paints merchant+phone+amount green on the same row — still two anchors.
+{
+  const w = 200
+  const h = 100
+  const data = new Uint8ClampedArray(w * h * 4)
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 15
+    data[i + 1] = 18
+    data[i + 2] = 25
+    data[i + 3] = 255
+  }
+  const paintGreenRect = (x0: number, y0: number, x1: number, y1: number) => {
+    for (let y = y0; y <= y1; y += 1) {
+      for (let x = x0; x <= x1; x += 1) {
+        const i = (y * w + x) * 4
+        data[i] = 40
+        data[i + 1] = 150
+        data[i + 2] = 85
+      }
+    }
+  }
+  // Full-row green: left merchant/phone + right amount (two credit rows)
+  paintGreenRect(10, 20, 110, 32) // merchant
+  paintGreenRect(150, 20, 190, 32) // −$41.19
+  paintGreenRect(10, 50, 110, 62)
+  paintGreenRect(150, 50, 190, 62) // −$29.37
+
+  const anchors = findGreenCreditAnchors(data, w, h)
+  assert.equal(
+    anchors.length,
+    2,
+    `full-row green must yield 2 amount anchors, got ${anchors.length}`,
+  )
+  assert.ok(anchors[0].x >= 130 && anchors[0].x < 150, `anchor0 x=${anchors[0].x}`)
+  assert.ok(anchors[1].x >= 130 && anchors[1].x < 150, `anchor1 x=${anchors[1].x}`)
+}
+
 // inkMinusAt writes black bar
 {
   const w = 40
