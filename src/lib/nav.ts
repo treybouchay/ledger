@@ -35,7 +35,7 @@ const BUDGETING_TAB_IDS: ReadonlySet<string> = new Set(
   BUDGETING_TABS.map(([id]) => id),
 )
 
-const GEAR_SUBS = ['month', 'cash', 'history', 'keep'] as const
+const GEAR_SUBS = ['month', 'cash', 'history', 'keep', 'insights'] as const
 
 export type GearSubTab = (typeof GEAR_SUBS)[number]
 

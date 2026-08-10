@@ -14,6 +14,7 @@ import {
   cashTimeline,
   detachBuyFromProjectedMonth,
   effectiveListingStatus,
+  gearSalesInsights,
   insertCashMoveSorted,
   keptBuyIds,
   linkCashMoves,
@@ -29,7 +30,10 @@ import {
   sumNullable,
   syncPlannerMonths,
   unlinkCashMove,
+  type CompletedFlipInsight,
+  type GearInsightsPeriod,
   type SellItemSuggestion,
+  type VolumeLeaderInsight,
 } from '../lib/gearStorage'
 import {
   emptyGearTags,
@@ -3488,6 +3492,209 @@ function formatAddedAt(iso?: string | null): string {
   })
 }
 
+function formatMarginPct(margin: number | null): string {
+  if (margin == null || Number.isNaN(margin)) return '—'
+  return `${Math.round(margin * 1000) / 10}%`
+}
+
+function formatDaysToSell(days: number | null): string {
+  if (days == null) return '—'
+  if (days === 0) return 'Same day'
+  if (days === 1) return '1 day'
+  return `${days} days`
+}
+
+function InsightsFlipRow({ flip }: { flip: CompletedFlipInsight }) {
+  return (
+    <li className="cash-math-row gear-insight-row">
+      <div className="cash-math-main">
+        <span className="cash-math-item">{flip.label}</span>
+        <span className="cash-math-meta">
+          <GearTagPills tags={flip.tags} />
+          {flip.sellDate ? (
+            <time dateTime={flip.sellDate}>Sold {flip.sellDate}</time>
+          ) : null}
+        </span>
+      </div>
+      <div className="cash-math-figures">
+        <span
+          className={`cash-math-run total${
+            flip.profit > 0 ? ' good' : flip.profit < 0 ? ' bad' : ''
+          }`}
+        >
+          {flip.profit > 0 ? '+' : flip.profit < 0 ? '−' : ''}
+          {formatMoney(Math.abs(flip.profit))}
+        </span>
+        <span className="cash-math-delta muted">
+          Sold {formatMoney(flip.sold)} · Cost {formatMoney(flip.purchased)}
+          {flip.margin != null ? ` · ${formatMarginPct(flip.margin)}` : ''}
+        </span>
+      </div>
+    </li>
+  )
+}
+
+function InsightsVolumeRow({ row }: { row: VolumeLeaderInsight }) {
+  return (
+    <li className="cash-math-row gear-insight-row">
+      <div className="cash-math-main">
+        <span className="cash-math-item">{row.label}</span>
+        <span className="cash-math-meta">
+          {row.sellCount} sell{row.sellCount === 1 ? '' : 's'}
+        </span>
+      </div>
+      <div className="cash-math-figures">
+        <span className="cash-math-run total">{formatMoney(row.totalSold)}</span>
+        <span className="cash-math-delta muted">Total sold</span>
+      </div>
+    </li>
+  )
+}
+
+function InsightsPanel({ moves }: { moves: GearCashMove[] }) {
+  const [period, setPeriod] = useState<GearInsightsPeriod>('all')
+  const insights = useMemo(
+    () => gearSalesInsights(moves, period),
+    [moves, period],
+  )
+  const periodNote =
+    period === 'all'
+      ? 'All time · linked flips for profit & speed; all sells for volume'
+      : 'This month · by sell date'
+
+  return (
+    <div className="layout gear-insights">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Insights</h2>
+            <p>What flips well, what moves volume, and what turns fastest</p>
+          </div>
+          <div className="lot-toggles" role="group" aria-label="Period">
+            <button
+              type="button"
+              className={`ghost${period === 'all' ? ' active-toggle' : ''}`}
+              aria-pressed={period === 'all'}
+              onClick={() => setPeriod('all')}
+            >
+              All time
+            </button>
+            <button
+              type="button"
+              className={`ghost${period === 'month' ? ' active-toggle' : ''}`}
+              aria-pressed={period === 'month'}
+              onClick={() => setPeriod('month')}
+            >
+              This month
+            </button>
+          </div>
+        </div>
+        <p className="empty-note tight gear-insights-note">{periodNote}</p>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Most successful</h2>
+            <p>Highest profit among completed linked flips</p>
+          </div>
+        </div>
+        {insights.mostSuccessful.length === 0 ? (
+          <p className="empty-note">
+            No completed linked flips yet. Link a buy and sell on Cash ledger.
+          </p>
+        ) : (
+          <ul className="gear-insights-list">
+            {insights.mostSuccessful.slice(0, 15).map((flip) => (
+              <InsightsFlipRow key={flip.linkGroupId} flip={flip} />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>What sells the most</h2>
+            <p>Volume leaders by type and by brand / model</p>
+          </div>
+        </div>
+        {insights.byKind.length === 0 && insights.byBrandModel.length === 0 ? (
+          <p className="empty-note">No sells yet.</p>
+        ) : (
+          <div className="gear-insights-volume">
+            <div>
+              <h3 className="gear-insights-subhead">By type</h3>
+              {insights.byKind.length === 0 ? (
+                <p className="empty-note tight">No typed sells.</p>
+              ) : (
+                <ul className="gear-insights-list">
+                  {insights.byKind.slice(0, 12).map((row) => (
+                    <InsightsVolumeRow key={row.key} row={row} />
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <h3 className="gear-insights-subhead">By brand / model</h3>
+              {insights.byBrandModel.length === 0 ? (
+                <p className="empty-note tight">No branded sells.</p>
+              ) : (
+                <ul className="gear-insights-list">
+                  {insights.byBrandModel.slice(0, 12).map((row) => (
+                    <InsightsVolumeRow key={row.key} row={row} />
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>What sells the fastest</h2>
+            <p>Shortest buy → sell among linked flips with dates</p>
+          </div>
+        </div>
+        {insights.fastest.length === 0 ? (
+          <p className="empty-note">
+            No dated linked flips yet. Add buy and sell dates on Cash ledger.
+          </p>
+        ) : (
+          <ul className="gear-insights-list">
+            {insights.fastest.slice(0, 15).map((flip) => (
+              <li key={flip.linkGroupId} className="cash-math-row gear-insight-row">
+                <div className="cash-math-main">
+                  <span className="cash-math-item">{flip.label}</span>
+                  <span className="cash-math-meta">
+                    <GearTagPills tags={flip.tags} />
+                    {flip.buyDate && flip.sellDate ? (
+                      <span>
+                        {flip.buyDate} → {flip.sellDate}
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+                <div className="cash-math-figures">
+                  <span className="cash-math-run total">
+                    {formatDaysToSell(flip.daysToSell)}
+                  </span>
+                  <span className="cash-math-delta muted">
+                    {flip.profit > 0 ? '+' : flip.profit < 0 ? '−' : ''}
+                    {formatMoney(Math.abs(flip.profit))} profit
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}
+
 function KeepListPanel({
   keepList,
   onChange,
@@ -4129,8 +4336,7 @@ export function GearFlipsPanel({
         <div>
           <h2>Gear flips</h2>
           <p>
-            Projected profit and a soft cash ledger for buys, sells, and keep
-            items
+            Projected profit, cash ledger, keep list, and sales insights
           </p>
         </div>
         <div className="panel-filters">
@@ -4166,6 +4372,14 @@ export function GearFlipsPanel({
               onClick={() => setSub('keep')}
             >
               Keep list
+            </button>
+            <button
+              type="button"
+              className="tab"
+              aria-selected={sub === 'insights'}
+              onClick={() => setSub('insights')}
+            >
+              Insights
             </button>
           </div>
           <button
@@ -4228,6 +4442,8 @@ export function GearFlipsPanel({
       {sub === 'keep' ? (
         <KeepListPanel keepList={keepList} onChange={changeKeepList} />
       ) : null}
+
+      {sub === 'insights' ? <InsightsPanel moves={state.cash} /> : null}
     </div>
   )
 }

@@ -2647,6 +2647,52 @@ select {
   margin: 0;
 }
 
+.gear-insights-note {
+  padding-left: 1.15rem;
+  padding-right: 1.15rem;
+  padding-bottom: 1rem;
+}
+
+.gear-insights-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 1.15rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.gear-insight-row {
+  padding: 0.45rem 0.1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.gear-insight-row:last-child {
+  border-bottom: none;
+}
+
+.gear-insights-volume {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1.25rem;
+  padding-bottom: 0.35rem;
+}
+
+.gear-insights-subhead {
+  margin: 0;
+  padding: 0 1.15rem;
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 720px) {
+  .gear-insights-volume {
+    grid-template-columns: 1fr;
+  }
+}
+
 .lot-toolbar {
   display: flex;
   flex-wrap: wrap;

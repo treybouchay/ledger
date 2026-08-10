@@ -746,6 +746,231 @@ export function realizedFlipProfitForMonth(
   }
 }
 
+export type GearInsightsPeriod = 'all' | 'month'
+
+export interface CompletedFlipInsight {
+  linkGroupId: string
+  label: string
+  tags: GearItemTags | null
+  sold: number
+  purchased: number
+  profit: number
+  /** Profit ÷ cost as a fraction (0.25 = 25%). Null when cost is 0. */
+  margin: number | null
+  buyDate: string
+  sellDate: string
+  /** Calendar days from earliest buy date to earliest sell date. */
+  daysToSell: number | null
+}
+
+export interface VolumeLeaderInsight {
+  key: string
+  label: string
+  sellCount: number
+  totalSold: number
+}
+
+export interface GearSalesInsights {
+  mostSuccessful: CompletedFlipInsight[]
+  byKind: VolumeLeaderInsight[]
+  byBrandModel: VolumeLeaderInsight[]
+  fastest: CompletedFlipInsight[]
+}
+
+function parseYmd(value?: string | null): string {
+  return value?.trim().slice(0, 10) ?? ''
+}
+
+function daysBetweenYmd(start: string, end: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+    return null
+  }
+  const a = Date.UTC(
+    Number(start.slice(0, 4)),
+    Number(start.slice(5, 7)) - 1,
+    Number(start.slice(8, 10)),
+  )
+  const b = Date.UTC(
+    Number(end.slice(0, 4)),
+    Number(end.slice(5, 7)) - 1,
+    Number(end.slice(8, 10)),
+  )
+  return Math.round((b - a) / 86_400_000)
+}
+
+function currentMonthId(now = new Date()): string {
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  return `${y}-${m}`
+}
+
+function sellInPeriod(
+  sell: GearCashMove,
+  period: GearInsightsPeriod,
+  monthId: string,
+): boolean {
+  if (period === 'all') return true
+  return (sell.date?.trim().slice(0, 7) ?? '') === monthId
+}
+
+function earliestDate(moves: GearCashMove[]): string {
+  return moves
+    .map((m) => parseYmd(m.date))
+    .filter(Boolean)
+    .sort()[0] ?? ''
+}
+
+function completedFlips(
+  cash: GearCashMove[],
+  period: GearInsightsPeriod,
+  monthId: string,
+): CompletedFlipInsight[] {
+  const linkedSells = cash.filter(
+    (m) =>
+      m.direction === 'in' &&
+      Boolean(m.linkGroupId) &&
+      sellInPeriod(m, period, monthId),
+  )
+  const seen = new Set<string>()
+  const flips: CompletedFlipInsight[] = []
+
+  for (const sell of linkedSells) {
+    const groupId = sell.linkGroupId
+    if (!groupId || seen.has(groupId)) continue
+    seen.add(groupId)
+    const stats = cashGroupEconomics(cash, sell)
+    if (!stats) continue
+    const { label, tags } = flipRowLabel(stats.buys, stats.sells)
+    const buyDate = earliestDate(stats.buys)
+    const sellDate = earliestDate(stats.sells)
+    const daysToSell = daysBetweenYmd(buyDate, sellDate)
+    const margin =
+      stats.purchased > 0
+        ? Math.round((stats.profit / stats.purchased) * 1000) / 1000
+        : null
+    flips.push({
+      linkGroupId: groupId,
+      label,
+      tags,
+      sold: stats.sold,
+      purchased: stats.purchased,
+      profit: stats.profit,
+      margin,
+      buyDate,
+      sellDate,
+      daysToSell:
+        daysToSell != null && daysToSell >= 0 ? daysToSell : null,
+    })
+  }
+
+  return flips
+}
+
+function volumeLeaders(
+  sells: GearCashMove[],
+  keyOf: (sell: GearCashMove) => { key: string; label: string } | null,
+): VolumeLeaderInsight[] {
+  const map = new Map<string, VolumeLeaderInsight>()
+  for (const sell of sells) {
+    const keyed = keyOf(sell)
+    if (!keyed) continue
+    const prev = map.get(keyed.key)
+    if (prev) {
+      prev.sellCount += 1
+      prev.totalSold =
+        Math.round((prev.totalSold + sell.amount) * 100) / 100
+    } else {
+      map.set(keyed.key, {
+        key: keyed.key,
+        label: keyed.label,
+        sellCount: 1,
+        totalSold: Math.round(sell.amount * 100) / 100,
+      })
+    }
+  }
+  return [...map.values()].sort((a, b) => {
+    if (b.sellCount !== a.sellCount) return b.sellCount - a.sellCount
+    if (b.totalSold !== a.totalSold) return b.totalSold - a.totalSold
+    return a.label.localeCompare(b.label)
+  })
+}
+
+function brandModelKey(
+  sell: GearCashMove,
+): { key: string; label: string } | null {
+  const brand = sell.tags?.brand?.trim() || ''
+  const model = sell.tags?.detail?.trim() || ''
+  if (brand || model) {
+    const label = [brand, model].filter(Boolean).join(' ')
+    return {
+      key: `bm:${brand.toLowerCase()}|${model.toLowerCase()}`,
+      label,
+    }
+  }
+  const fromTags = formatGearItemLabel(sell.tags)
+  const text = (sell.item ?? '').trim() || fromTags
+  if (!text) return null
+  return { key: `item:${normalizeCashItem(text)}`, label: text }
+}
+
+function kindVolumeKey(
+  sell: GearCashMove,
+): { key: string; label: string } | null {
+  const kind = sell.tags?.kind
+  if (kind && kind !== 'other') {
+    return { key: `kind:${kind}`, label: kindLabel(kind) }
+  }
+  if (kind === 'other') {
+    return { key: 'kind:other', label: 'Other' }
+  }
+  const type = (sell.type ?? '').trim()
+  if (type && type !== 'SELL' && type !== 'BUY') {
+    return { key: `type:${type.toLowerCase()}`, label: type }
+  }
+  return { key: 'kind:unknown', label: 'Untagged' }
+}
+
+/**
+ * Sales insights from gear cash ledger moves.
+ * Profit / speed use completed linked flips only; volume uses sell rows.
+ */
+export function gearSalesInsights(
+  cash: GearCashMove[],
+  period: GearInsightsPeriod = 'all',
+  now = new Date(),
+): GearSalesInsights {
+  const monthId = currentMonthId(now)
+  const flips = completedFlips(cash, period, monthId)
+  const sells = cash.filter(
+    (m) => m.direction === 'in' && sellInPeriod(m, period, monthId),
+  )
+
+  const mostSuccessful = [...flips].sort((a, b) => {
+    if (b.profit !== a.profit) return b.profit - a.profit
+    const am = a.margin ?? -Infinity
+    const bm = b.margin ?? -Infinity
+    if (bm !== am) return bm - am
+    return a.label.localeCompare(b.label)
+  })
+
+  const fastest = flips
+    .filter((f) => f.daysToSell != null)
+    .sort((a, b) => {
+      const ad = a.daysToSell ?? Infinity
+      const bd = b.daysToSell ?? Infinity
+      if (ad !== bd) return ad - bd
+      if (b.profit !== a.profit) return b.profit - a.profit
+      return a.label.localeCompare(b.label)
+    })
+
+  return {
+    mostSuccessful,
+    byKind: volumeLeaders(sells, kindVolumeKey),
+    byBrandModel: volumeLeaders(sells, brandModelKey),
+    fastest,
+  }
+}
+
 export function normalizeCashItem(item?: string | null): string {
   return (item ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
