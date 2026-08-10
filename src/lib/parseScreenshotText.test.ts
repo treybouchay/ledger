@@ -525,4 +525,88 @@ $48.23
   assert.equal(rows[0].amount, 48.23)
 }
 
+// Real SimplyCash layout (Aug 10 screenshot): undated posted Uber Toronto
+// above the first date header + twin green Amazon credits (−$45.19 / −$29.37).
+// Pending rows and the Personal Loan promo must not import.
+const amexAug10UndatedUberTwinAmazon = `
+SimplyCash Preferred Card
+....71003
+AMAZON
+$32.26
+Pending
+UBER EATS
+$87.22
+Pending
+AMAZONCOM PAYMENTS-CA
+$24.85
+Pending
+UBER EATS TORONTO
+$91.27
+Congratulations! You're pre-approved for a Personal Loan of up to $50,000. Terms apply.
+Get Started
+6 Aug
+TIM HORTONS
+$8.13
+Pending
+AMZN MKTP CA 866-216-1072
+−$45.19
+AMZN MKTP CA 866-216-1072
+−$29.37
+Overview
+Membership
+Amex Offers
+Account
+`
+
+{
+  const today = new Date()
+  const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  const rows = parseScreenshotText(amexAug10UndatedUberTwinAmazon)
+  assert.equal(rows.length, 3, `expected Uber + 2 Amazons, got ${rows.length}: ${rows.map((r) => r.merchant).join(', ')}`)
+  const uber = rows.find((r) => /uber/i.test(r.merchant) && r.amount === 91.27)
+  assert.ok(uber, 'undated UBER EATS TORONTO $91.27 (no Pending) must import')
+  assert.equal(uber!.date, todayYmd)
+  assert.equal(uber!.isRefund, false)
+  const amazons = rows.filter((r) => /amzn/i.test(r.merchant))
+  assert.equal(amazons.length, 2)
+  assert.ok(amazons.every((r) => r.isRefund))
+  assert.deepEqual(
+    amazons.map((r) => r.amount).sort((a, b) => a - b),
+    [29.37, 45.19],
+  )
+  assert.ok(rows.every((r) => !/tim\s*hort|loan|50,?000|amazoncom|pending/i.test(r.merchant)))
+  assert.ok(!rows.some((r) => r.amount === 50000 || r.amount === 32.26 || r.amount === 8.13))
+}
+
+// Real OCR: -$45.19 → -845.19 ($ misread as 8); second minus lost → still twin refunds.
+const amexAug10RealOcrGlyphs = `
+SimplyCash Preferred Card
+UBER EATS TORONTO                          $91.27
+Congratulations!
+You're pre-approved for a Personal Loan
+of up to $50,000. Terms apply.
+Get Started
+6 Aug
+TIM HORTONS                                    $8.13
+Pending
+AMZN MKTP CA 866-216-1072          -845.19
+AMZN MKTP CA 866-216-1072            $29.37
+Overview
+`
+
+{
+  const rows = parseScreenshotText(amexAug10RealOcrGlyphs)
+  const uber = rows.find((r) => /uber/i.test(r.merchant))
+  assert.ok(uber)
+  assert.equal(uber!.amount, 91.27)
+  const amazons = rows.filter((r) => /amzn/i.test(r.merchant))
+  assert.equal(amazons.length, 2)
+  assert.deepEqual(
+    amazons.map((r) => r.amount).sort((a, b) => a - b),
+    [29.37, 45.19],
+  )
+  assert.ok(amazons.every((r) => r.isRefund), 'twin AMZN MKTP must both be refunds')
+  assert.ok(!rows.some((r) => r.amount === 845.19 || r.amount === 50000 || r.amount === 8.13))
+}
+
 console.log('parseScreenshotText.test.ts: all assertions passed')

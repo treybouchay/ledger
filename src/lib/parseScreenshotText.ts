@@ -15,7 +15,11 @@ import { suggestTdAccount } from './parseTd'
 import type { AccountId } from '../types'
 
 const SKIP_LINE =
-  /^(congratulations|pre-approved|overview|membership|offers|account|pay\s*&\s*transfer|terms apply|search|activity|posted|account details|td first class|visa infinite|travel visa|chequing|savings)\b/i
+  /^(congratulations|pre-approved|you'?re\s+pre-approved|youre\s+pre-approved|get\s+started|overview|membership|offers|account|pay\s*&\s*transfer|terms apply|search|activity|posted|account details|td first class|visa infinite|travel visa|chequing|savings)\b/i
+
+/** Loan / promo banners (Amex Personal Loan card) — never merchants or amounts. */
+const SKIP_PROMO =
+  /pre-approved|personal\s+loan|terms\s+apply|get\s+started|congratulations/i
 
 /** Amex puts city / phone under the merchant — never a payee by itself. */
 const PHONE_LIKE =
@@ -33,10 +37,15 @@ export function parseScreenshotText(text: string): ParsedStatementRow[] {
   const scrubbed = scrubPhoneAmountOcr(normalizeCreditAmountGlyphs(text))
   const fromSections = parseSectionedActivity(scrubbed)
 
-  // Sectioned parse is authoritative when it finds charges. Aggressive
-  // window joins were inventing "Tuesday FAE HEALING" and wrong payees.
+  // Sectioned parse is authoritative for Amex/TD activity screenshots — even
+  // when every visible row is Pending (zero posted). Falling back to naive
+  // date-header pairs re-imports Pending Tim Hortons and drops credit rules.
+  const amexOrTdActivityShot =
+    /simplycash|\bpending\b|\bamex\b|american\s*express|membership\s*rewards/i.test(
+      scrubbed,
+    )
   const extras =
-    fromSections.length > 0
+    fromSections.length > 0 || amexOrTdActivityShot
       ? []
       : [
           ...parseStatementText(scrubbed).filter((row) =>
@@ -244,12 +253,19 @@ function normalizeMinusGlyphs(text: string): string {
 /**
  * Amex green −$ amounts often OCR as a stray glyph before the dollars
  * (`~$41.19`, `=$41.19`, `_$41.19`) once the minus washes out.
+ * Also repair `-$45.19` → `-845.19` when `$` is read as `8` after the minus.
  */
 function normalizeCreditAmountGlyphs(text: string): string {
-  return normalizeMinusGlyphs(text).replace(
-    /[~≈=_|]\s*(\$\s*\d{1,3}(?:,\d{3})*\.\d{1,2})\b/g,
-    '-$1',
-  )
+  return normalizeMinusGlyphs(text)
+    .replace(/[~≈=_|]\s*(\$\s*\d{1,3}(?:,\d{3})*\.\d{1,2})\b/g, '-$1')
+    .replace(
+      /(?<![\d.])-\s*8(\d{2}\.\d{2})\b/g,
+      (_full, rest: string) => {
+        const n = Number(rest)
+        // `$45.19` → `845.19` after a credit minus; keep real `-8.50` / `-812`.
+        return n >= 10 && n < 100 ? `-${rest}` : `-8${rest}`
+      },
+    )
 }
 
 /**
@@ -602,13 +618,15 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     .map((l) => l.replace(/\s+/g, ' ').trim())
     .filter((l) => l.length > 0)
 
-  let currentDate: string | null = null
+  // Amex puts recent posted charges above the first dated section with no
+  // date header. Default those to today so Uber Eats Toronto etc. import.
+  let currentDate: string | null = localTodayYmd()
   let pendingMerchant: string | null = null
   const rows: ParsedStatementRow[] = []
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]
-    if (SKIP_LINE.test(line)) continue
+    if (SKIP_LINE.test(line) || SKIP_PROMO.test(line)) continue
     if (isPendingStatusOnly(line)) continue
     // Keep pending merchant; Credit badge is read from neighbors of the amount.
     if (isCreditStatusOnly(line)) continue
@@ -690,7 +708,42 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     })
   }
 
-  return rows
+  return promoteTwinAmznMktpRefunds(rows)
+}
+
+function localTodayYmd(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/**
+ * OCR often keeps the minus on only one of two same-day AMZN MKTP CA credits.
+ * If any twin is already a refund, promote the rest so both greens import.
+ */
+function promoteTwinAmznMktpRefunds(
+  rows: ParsedStatementRow[],
+): ParsedStatementRow[] {
+  const byDate = new Map<string, ParsedStatementRow[]>()
+  for (const row of rows) {
+    if (!/amzn\s*mktp/i.test(row.merchant)) continue
+    const list = byDate.get(row.date) ?? []
+    list.push(row)
+    byDate.set(row.date, list)
+  }
+  const promote = new Set<ParsedStatementRow>()
+  for (const list of byDate.values()) {
+    if (list.length < 2) continue
+    if (!list.some((r) => r.isRefund)) continue
+    // Different amounts = twin returns (not a re-OCR dupe of one credit).
+    const amounts = new Set(list.map((r) => roundMoney(r.amount)))
+    if (amounts.size < 2) continue
+    for (const r of list) promote.add(r)
+  }
+  if (promote.size === 0) return rows
+  return rows.map((r) => (promote.has(r) ? { ...r, isRefund: true } : r))
 }
 
 /** Walk up past store # / city subtitles to the real payee name. */
@@ -698,7 +751,7 @@ function findMerchantAbove(lines: string[], index: number): string | null {
   for (let j = index - 1; j >= Math.max(0, index - 4); j -= 1) {
     const prev = lines[j]
     if (isDateOnlyLine(prev)) break
-    if (SKIP_LINE.test(prev) || isPendingStatusOnly(prev)) break
+    if (SKIP_LINE.test(prev) || SKIP_PROMO.test(prev) || isPendingStatusOnly(prev)) break
     if (isCreditStatusOnly(prev)) continue
     if (isLocationOrDetailSubtitle(prev)) continue
     if (lineHasAmount(prev)) break

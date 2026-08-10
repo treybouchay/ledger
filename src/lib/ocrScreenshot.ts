@@ -195,8 +195,9 @@ export function inkMinusAt(
   cx: number,
   cy: number,
 ): void {
-  const thickness = Math.max(2, Math.round(height * 0.003))
-  const halfW = Math.max(4, Math.round(height * 0.008))
+  // Slightly bolder than before — thin unicode − often vanishes at phone DPI.
+  const thickness = Math.max(2, Math.round(height * 0.004))
+  const halfW = Math.max(5, Math.round(height * 0.011))
   for (let dy = -thickness; dy <= thickness; dy += 1) {
     const y = cy + dy
     if (y < 0 || y >= height) continue
@@ -209,37 +210,99 @@ export function inkMinusAt(
   }
 }
 
+/**
+ * Close a binary mask (dilate then erode) so anti-aliased green glyphs become
+ * solid ink instead of salt-and-pepper that destroys Tesseract on Amex credits.
+ */
+export function closeBinaryMask(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  radius = 1,
+): Uint8Array {
+  const dilate = new Uint8Array(mask.length)
+  const out = new Uint8Array(mask.length)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let hit = 0
+      for (let dy = -radius; dy <= radius && !hit; dy += 1) {
+        for (let dx = -radius; dx <= radius; dx += 1) {
+          const yy = y + dy
+          const xx = x + dx
+          if (yy < 0 || yy >= height || xx < 0 || xx >= width) continue
+          if (mask[yy * width + xx]) {
+            hit = 1
+            break
+          }
+        }
+      }
+      dilate[y * width + x] = hit
+    }
+  }
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let ok = 1
+      for (let dy = -radius; dy <= radius && ok; dy += 1) {
+        for (let dx = -radius; dx <= radius; dx += 1) {
+          const yy = y + dy
+          const xx = x + dx
+          if (yy < 0 || yy >= height || xx < 0 || xx >= width) continue
+          if (!dilate[yy * width + xx]) {
+            ok = 0
+            break
+          }
+        }
+      }
+      out[y * width + x] = ok
+    }
+  }
+  return out
+}
+
 /** Mutates ImageData in place: grayscale + invert-if-dark + contrast. */
 export function processImageDataForOcr(imageData: ImageData): void {
-  const { data } = imageData
+  const { data, width, height } = imageData
   let lumaSum = 0
   const pixels = data.length / 4
   const gray = new Float32Array(pixels)
-  const wasCreditGreen = new Uint8Array(pixels)
+  const rawGreen = new Uint8Array(pixels)
 
   for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
     const r = data[i]
     const g = data[i + 1]
     const b = data[i + 2]
-    if (isCreditGreenPixel(r, g, b) || (g - (r + b) / 2 > 10 && g > r + 8 && g > b + 5)) {
-      wasCreditGreen[p] = 1
+    if (
+      isCreditGreenPixel(r, g, b) ||
+      (g - (r + b) / 2 > 10 && g > r + 8 && g > b + 5)
+    ) {
+      rawGreen[p] = 1
     }
-    const y = rgbaToOcrGray(r, g, b)
+    // Ordinary gray; green is remapped after we know invert vs light mode.
+    const y = 0.5 * r + 0.5 * b
     gray[p] = y
     lumaSum += y
   }
 
   const avg = lumaSum / pixels
   const invert = avg < 128
+  const wasCreditGreen = closeBinaryMask(rawGreen, width, height, 1)
 
   for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
     let y = gray[p]
-    if (invert) y = 255 - y
-    // After invert, former green credits would flip to white — force ink.
     if (wasCreditGreen[p]) {
-      y = Math.min(y, 28)
+      // Dark mode: treat credit-green like white label text so invert → clean
+      // black (avoids near-0 gray flipping to white speckles).
+      // Light mode: keep green as near-black ink on mint.
+      y = invert ? 235 : Math.min(y, 32)
     }
-    y = (y - 128) * 1.45 + 128
+    if (invert) y = 255 - y
+    if (!wasCreditGreen[p]) {
+      y = (y - 128) * 1.45 + 128
+    } else {
+      // Mild contrast only — solid glyphs, not crushed noise.
+      y = (y - 128) * 1.15 + 128
+      y = Math.min(y, 40)
+    }
     y = Math.max(0, Math.min(255, y))
     data[i] = data[i + 1] = data[i + 2] = y
   }

@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import {
+  closeBinaryMask,
   findGreenCreditAnchors,
   inkMinusAt,
   isCreditGreenPixel,
@@ -186,6 +187,17 @@ function makeImageData(
   const data = new Uint8ClampedArray(w * h * 4).fill(255)
   inkMinusAt(data, w, h, 20, 10)
   assert.ok(data[(10 * w + 20) * 4] === 0)
+}
+
+// Morph close fills 1px gaps in green credit masks (anti-alias speckles).
+{
+  const w = 5
+  const h = 5
+  const mask = new Uint8Array(w * h)
+  mask[2 * w + 1] = 1
+  mask[2 * w + 3] = 1
+  const closed = closeBinaryMask(mask, w, h, 1)
+  assert.equal(closed[2 * w + 2], 1, 'gap between green hits should close')
 }
 
 console.log('ocrScreenshot.test.ts: all assertions passed')
