@@ -181,7 +181,7 @@ Credit
   assert.ok(amazons.every((r) => r.isRefund))
 }
 
-// Same-amount twin Amazon returns — keep both; draft flags possible, not auto-exclude.
+// Exact same refund twice in one file → second is a duplicate (re-import).
 const twoAmazonSameAmount = `
 SimplyCash Preferred Card
 8 Aug
@@ -201,9 +201,10 @@ SEATTLE
   assert.ok(rows.every((r) => r.isRefund && r.amount === 29.99))
   const drafts = draftsFromParsed(rows, 'trevor', 'amex', [])
   assert.equal(drafts.length, 2)
-  assert.ok(drafts.every((d) => d.included))
   assert.equal(drafts[0].matchStatus, 'new')
-  assert.equal(drafts[1].matchStatus, 'possible')
+  assert.equal(drafts[0].included, true)
+  assert.equal(drafts[1].matchStatus, 'duplicate')
+  assert.equal(drafts[1].included, false)
 }
 
 // Near-amount refunds must not collapse into one.
@@ -400,6 +401,128 @@ PETRO-CANADA 65036 WHITBY               $65.06
     [29.37, 41.19],
   )
   assert.ok(rows.every((r) => !/tim\s*hort/i.test(r.merchant)))
+}
+
+// Twin different-amount Amazon refunds stay included (not collapsed / not dupes).
+{
+  const drafts = draftsFromParsed(
+    parseScreenshotText(twoAmazonDifferent),
+    'trevor',
+    'amex',
+    [],
+  )
+  const amazonDrafts = drafts.filter((d) => /amazon/i.test(d.merchant))
+  assert.equal(amazonDrafts.length, 2)
+  assert.ok(amazonDrafts.every((d) => d.included && d.isRefund))
+  assert.ok(amazonDrafts.every((d) => d.matchStatus === 'new'))
+}
+
+// Exact same refund vs an already-logged ledger credit → duplicate.
+{
+  const existing = [
+    {
+      id: 'tx-existing-amazon-refund',
+      personId: 'trevor' as const,
+      monthId: '2026-08',
+      date: '2026-08-08',
+      amount: 29.99,
+      merchant: 'AMAZON.COM AMZN.COM/BILL',
+      accountId: 'amex' as const,
+      categoryId: 'amazon' as const,
+      isRefund: true,
+      source: 'csv' as const,
+    },
+  ]
+  const rows = parseScreenshotText(`
+SimplyCash Preferred Card
+8 Aug
+AMAZON.COM AMZN.COM/BILL
+Credit
+$29.99
+SEATTLE
+`)
+  const drafts = draftsFromParsed(rows, 'trevor', 'amex', existing)
+  assert.equal(drafts.length, 1)
+  assert.equal(drafts[0].matchStatus, 'duplicate')
+  assert.equal(drafts[0].included, false)
+  assert.ok(/duplicate refund/i.test(drafts[0].matchReason ?? ''))
+}
+
+// Uber Eats Toronto-style multi-line OCR must become a charge.
+const uberEatsToronto = `
+SimplyCash Preferred Card
+American Express
+7 Aug
+UBER EATS
+TORONTO
+$48.23
+STARBUCKS #2841
+$7.45
+WHITBY
+`
+
+{
+  const rows = parseScreenshotText(uberEatsToronto)
+  const uber = rows.find((r) => /uber/i.test(r.merchant))
+  assert.ok(uber, 'UBER EATS + TORONTO must parse to a charge')
+  assert.equal(uber!.amount, 48.23)
+  assert.equal(uber!.isRefund, false)
+  assert.match(uber!.merchant, /uber\s*eats/i)
+}
+
+// OCR-glued UBEREATS + city/province must not be dropped as a "city".
+const uberEatsGlued = `
+SimplyCash Preferred Card
+7 Aug
+UBEREATS
+TORONTO ON
+$52.18
+PETRO-CANADA 65696 WHITBY
+$15.80
+`
+
+{
+  const rows = parseScreenshotText(uberEatsGlued)
+  const uber = rows.find((r) => /uber/i.test(r.merchant))
+  assert.ok(uber, 'glued UBEREATS must not be skipped as a city subtitle')
+  assert.equal(uber!.amount, 52.18)
+  assert.match(uber!.merchant, /uber\s*eats/i)
+  assert.ok(!/toronto/i.test(uber!.merchant))
+}
+
+// HELP.UBER.COM / order id under the payee must not steal the merchant.
+const uberEatsHelpUrl = `
+SimplyCash Preferred Card
+7 Aug
+UBER *EATS
+HELP.UBER.COM
+TORONTO ON CA
+$61.99
+`
+
+{
+  const rows = parseScreenshotText(uberEatsHelpUrl)
+  assert.equal(rows.length, 1)
+  assert.match(rows[0].merchant, /uber\s*eats/i)
+  assert.equal(rows[0].amount, 61.99)
+  assert.ok(!/help\.uber|toronto/i.test(rows[0].merchant))
+}
+
+// Split "UBER" / "EATS" lines still resolve to Uber Eats.
+const uberEatsSplitLines = `
+SimplyCash Preferred Card
+7 Aug
+UBER
+EATS
+TORONTO
+$48.23
+`
+
+{
+  const rows = parseScreenshotText(uberEatsSplitLines)
+  assert.equal(rows.length, 1)
+  assert.match(rows[0].merchant, /uber\s*eats/i)
+  assert.equal(rows[0].amount, 48.23)
 }
 
 console.log('parseScreenshotText.test.ts: all assertions passed')

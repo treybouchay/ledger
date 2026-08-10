@@ -85,6 +85,14 @@ function isCreditStatusOnly(line: string): boolean {
   return /^(credit|refund|return)\.?$/i.test(line.replace(/\s+/g, ' ').trim())
 }
 
+/** Canadian / US province+country fragments under Amex payees. */
+const REGION_CODE =
+  /^(on|bc|ab|qc|mb|sk|ns|nb|nl|pe|nt|nu|yt|ca|us|usa|canada)$/i
+
+/** One-word payees that must not be mistaken for city subtitles. */
+const SINGLE_WORD_MERCHANT =
+  /^(nordstrom|starbucks|costco|walmart|target|netflix|spotify|uber|ubereats|lyft|sobeys|loblaws|amazon|factor|docupet|cursor|metro|apple|google|mcdonalds|sidelineswap|openai|petro|esso|shell)$/i
+
 /**
  * Amex puts city / phone / URL fragments under the amount. Those are not the
  * next merchant — skip them when hunting for a Credit/Pending badge so
@@ -108,19 +116,35 @@ function isLocationOrDetailSubtitle(line: string): boolean {
   }
   PHONE_IN_TEXT.lastIndex = 0
   if (/^amzn\.com\b/i.test(t)) return true
+  // Help URLs / order ids under Uber Eats & similar (not the payee).
+  if (/^(help\.)?uber\.com\.?$/i.test(t.replace(/\s+/g, ''))) return true
+  if (/^help\.uber\.com\b/i.test(t)) return true
+  if (/^order\s*#?\s*\d+\b/i.test(t)) return true
+  if (REGION_CODE.test(t)) return true
 
   const m = stripToMerchant(t)
-  if (!m || /\d/.test(m) || /\./.test(m)) return false
+  if (!m) return false
+  // Lone host/URL detail lines — not "AMAZON.COM AMZN.COM/BILL".
+  if (/^[a-z0-9.-]+\.(com|net|org|ca|io)$/i.test(m)) return true
+  if (/\d/.test(m) || /\./.test(m)) return false
 
   const words = m.split(/\s+/).filter(Boolean)
-  if (words.length === 0 || words.length > 3) return false
+  if (words.length === 0 || words.length > 4) return false
   if (!words.every((w) => /^[A-Za-z][A-Za-z'-]*$/.test(w))) return false
+
+  // City + province (+ country): TORONTO ON, TORONTO ON CA, WHITBY ON.
+  if (words.length >= 2 && words.slice(1).every((w) => REGION_CODE.test(w))) {
+    return true
+  }
 
   // Single token: city (SEATTLE / WHITBY), not a one-word merchant.
   if (words.length === 1) {
-    return !/^(nordstrom|starbucks|costco|walmart|target|netflix|spotify|uber|lyft|sobeys|loblaws|amazon|factor|docupet|cursor|metro|apple|google)$/i.test(
-      words[0],
-    )
+    if (SINGLE_WORD_MERCHANT.test(words[0])) return false
+    // OCR often glues "UBER EATS" → "UBEREATS" — treat as payee, not city.
+    if (/eats|hortons|mcdonald|amazon|amzn|openai|petro/i.test(words[0])) {
+      return false
+    }
+    return true
   }
 
   // Multi-word cities only with geographic prefixes — avoid “OLD NAVY”.
@@ -529,20 +553,47 @@ function resolveMerchant(
   onLine: string,
   pending: string | null,
 ): string | null {
-  const a = isPlausibleMerchant(onLine) ? onLine : null
+  // City / province sitting on the amount row must not become the payee.
+  const onLineMerchant = isLocationOrDetailSubtitle(onLine) ? '' : onLine
+  const a = isPlausibleMerchant(onLineMerchant) ? onLineMerchant : null
   const b = pending && isPlausibleMerchant(pending) ? pending : null
   if (a && b) {
+    // Prefer a real pending payee over a weak/city-ish amount-line fragment.
+    if (isStrongPayeeName(b) && !isStrongPayeeName(a)) return normalizeUberMerchant(b)
     // OCR split "DOCUPET PET" / "LICENSING $33.55" — join continuation.
     if (
       a.split(/\s+/).length <= 2 &&
       !b.toLowerCase().includes(a.toLowerCase()) &&
       !a.toLowerCase().includes(b.toLowerCase())
     ) {
-      return `${b} ${a}`
+      return normalizeUberMerchant(`${b} ${a}`)
     }
-    return a
+    return normalizeUberMerchant(a)
   }
-  return a ?? b
+  const picked = a ?? b
+  return picked ? normalizeUberMerchant(picked) : null
+}
+
+/** Prefer recognizable brand payees when OCR also emits city/URL crumbs. */
+function isStrongPayeeName(merchant: string): boolean {
+  return /uber|amzn|amazon|starbucks|tim\s*hort|mcdonald|petro|openai|chatgpt|nordstrom|wal-?mart|metro|costco|spotify|docupet|sidelineswap|factor|lyft/i.test(
+    merchant,
+  )
+}
+
+/** OCR glue / star variants → readable Uber Eats label. */
+function normalizeUberMerchant(merchant: string): string {
+  let m = merchant.replace(/\s+/g, ' ').trim()
+  m = m.replace(/\bUBER\s*\*?\s*EATS\b/i, 'UBER EATS')
+  m = m.replace(/\bUBEREATS\b/i, 'UBER EATS')
+  if (!/uber/i.test(m)) return m
+  // Drop trailing city/region Amex often appends on the same OCR line.
+  m = m.replace(
+    /\s+(TORONTO|VANCOUVER|MONTREAL|CALGARY|OTTAWA|WHITBY|SEATTLE|BOSTON|SAN\s+FRANCISCO)(?:\s+(?:ON|BC|AB|QC|CA|US)){0,2}\s*$/i,
+    '',
+  )
+  m = m.replace(/\s+HELP\.UBER\.COM\b/i, '')
+  return m.replace(/\s+/g, ' ').trim() || merchant
 }
 
 function parseSectionedActivity(text: string): ParsedStatementRow[] {
@@ -578,7 +629,18 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
       // City / phone under a prior charge must not become the next payee.
       if (isLocationOrDetailSubtitle(line)) continue
       if (isPlausibleMerchant(merchantOnLine)) {
-        pendingMerchant = merchantOnLine
+        // OCR often splits "UBER" / "EATS" or "DOCUPET" / "PET" across lines.
+        if (
+          pendingMerchant &&
+          merchantOnLine.split(/\s+/).length <= 2 &&
+          pendingMerchant.split(/\s+/).length <= 2 &&
+          !pendingMerchant.toLowerCase().includes(merchantOnLine.toLowerCase()) &&
+          !merchantOnLine.toLowerCase().includes(pendingMerchant.toLowerCase())
+        ) {
+          pendingMerchant = `${pendingMerchant} ${merchantOnLine}`
+        } else {
+          pendingMerchant = merchantOnLine
+        }
       }
       continue
     }

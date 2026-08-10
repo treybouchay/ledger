@@ -108,9 +108,19 @@ export function findDuplicateMatch(
     const gap = daysApart(candidate.date, tx.date)
 
     if (sim === 'strong' && gap <= 1) {
-      // Same-day (or ±1) refund twins are often two real returns — never
-      // auto-exclude; flag as possible so the user can confirm.
+      // Exact same-day refund (same merchant + amount) is a clear re-import
+      // of the same credit — auto-exclude. Near-day (±1) stays possible so
+      // posting-date shifts can be confirmed; different-amount twins never
+      // reach here (amounts must match).
       if (candidate.isRefund) {
+        if (gap === 0) {
+          return {
+            status: 'duplicate',
+            matchedTransactionId: tx.id,
+            matchedMerchant: tx.merchant,
+            reason: `Duplicate refund of “${tx.merchant}” on ${tx.date}`,
+          }
+        }
         best = {
           status: 'possible',
           matchedTransactionId: tx.id,
