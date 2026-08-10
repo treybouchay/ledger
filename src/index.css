@@ -963,6 +963,13 @@ select {
   font-weight: 600;
 }
 
+.share-list-meta {
+  margin: 0.35rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .share-list-detail {
   padding: 0 0.65rem 0.75rem 2.2rem;
 }
@@ -5500,6 +5507,31 @@ tr:last-child td {
   height: 100%;
   border-radius: inherit;
   background: var(--accent, #2f6b4f);
+}
+
+.share-cell.tone-ok .share-bar > span {
+  background: color-mix(in srgb, var(--accent) 85%, var(--good));
+}
+
+.share-cell.tone-tight .share-bar > span {
+  background: color-mix(in srgb, var(--accent) 55%, #b8860b);
+}
+
+.share-cell.tone-over .share-bar > span {
+  background: color-mix(in srgb, var(--bad) 85%, #7a2e24);
+}
+
+.share-cell.tone-uncapped .share-bar {
+  background: color-mix(in srgb, var(--surface-muted) 80%, #e4eee8);
+}
+
+.share-cell.tone-uncapped .share-bar > span {
+  width: 0 !important;
+  background: transparent;
+}
+
+.share-cell.tone-over .share-pct {
+  color: var(--bad);
 }
 
 .share-pct {

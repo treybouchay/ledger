@@ -29,6 +29,7 @@ import {
   readBackupFile,
 } from './lib/backup'
 import {
+  budgetFor,
   formatMoney,
   isMoneyIn,
   isVariableBudgetOver,
@@ -564,7 +565,12 @@ export default function App() {
   const householdCategorySpend = useMemo(() => {
     const map = new Map<
       string,
-      { categoryId: CategoryId; label: string; icon: string; spent: number }
+      {
+        categoryId: CategoryId
+        label: string
+        icon: string
+        spent: number
+      }
     >()
     const personIds: PersonId[] =
       personFilter === 'all' ? ['trevor', 'kate'] : [personFilter]
@@ -580,12 +586,25 @@ export default function App() {
         })
       }
     }
-    const rows = [...map.values()].sort((a, b) => b.spent - a.spent)
-    const total = rows.reduce((sum, r) => sum + r.spent, 0)
-    return rows.map((r) => ({
-      ...r,
-      share: total > 0 ? Math.round((r.spent / total) * 1000) / 10 : 0,
-    }))
+    return [...map.values()]
+      .sort((a, b) => b.spent - a.spent)
+      .map((r) => {
+        const cap = Math.round(
+          personIds.reduce(
+            (sum, personId) => sum + budgetFor(personId, r.categoryId),
+            0,
+          ) * 100,
+        ) / 100
+        const ofCap =
+          cap > 0 ? Math.round((r.spent / cap) * 1000) / 10 : null
+        return {
+          ...r,
+          cap,
+          ofCap,
+          leftover:
+            cap > 0 ? Math.round((cap - r.spent) * 100) / 100 : null,
+        }
+      })
   }, [monthTransactions, personFilter, customCategories, customBudgetTick])
 
   const recentVariableCharges = useMemo(() => {
@@ -2206,7 +2225,7 @@ export default function App() {
                 <div>
                   <h2>Where it went</h2>
                   <p>
-                    Share of variable {insightPersonLabel} spend by category this
+                    Variable {insightPersonLabel} spend vs category caps this
                     month
                   </p>
                 </div>
@@ -2224,6 +2243,18 @@ export default function App() {
                         ),
                       )
                     : []
+                  const hasCap = row.cap > 0
+                  const overCap = hasCap && row.spent > row.cap
+                  const barWidth = hasCap
+                    ? Math.min(row.ofCap ?? 0, 100)
+                    : 0
+                  const barTone = !hasCap
+                    ? 'uncapped'
+                    : overCap
+                      ? 'over'
+                      : (row.ofCap ?? 0) >= 90
+                        ? 'tight'
+                        : 'ok'
                   return (
                     <li
                       key={row.categoryId}
@@ -2259,16 +2290,30 @@ export default function App() {
                               {formatMoney(row.spent)}
                             </strong>
                           </div>
-                          <div className="share-cell">
+                          <div
+                            className={`share-cell tone-${barTone}`}
+                            aria-label={
+                              hasCap
+                                ? `${formatMoney(row.spent)} spent of ${formatMoney(row.cap)} cap${overCap ? ', over cap' : ''}`
+                                : `${formatMoney(row.spent)} spent, no cap set`
+                            }
+                          >
                             <div className="share-bar" aria-hidden>
-                              <span
-                                style={{
-                                  width: `${Math.min(row.share, 100)}%`,
-                                }}
-                              />
+                              <span style={{ width: `${barWidth}%` }} />
                             </div>
-                            <span className="share-pct">{row.share}%</span>
+                            <span className="share-pct">
+                              {hasCap ? `${row.ofCap}%` : '—'}
+                            </span>
                           </div>
+                          <p className="share-list-meta">
+                            {hasCap
+                              ? `cap ${formatMoney(row.cap)} · ${
+                                  overCap
+                                    ? `${formatMoney(Math.abs(row.leftover ?? 0))} over`
+                                    : `${formatMoney(row.leftover ?? 0)} left`
+                                }`
+                              : 'No category cap set'}
+                          </p>
                         </div>
                       </button>
                       {expanded ? (
