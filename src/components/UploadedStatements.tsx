@@ -26,6 +26,47 @@ function uploadedLabel(iso: string): string {
   })
 }
 
+/** Local calendar day key (YYYY-MM-DD) from an upload ISO timestamp. */
+function uploadDayKey(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) {
+    const fallback = iso.slice(0, 10)
+    return /^\d{4}-\d{2}-\d{2}$/.test(fallback) ? fallback : 'unknown'
+  }
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function uploadDayLabel(dayKey: string): string {
+  const [y, m, d] = dayKey.split('-').map(Number)
+  if (!y || !m || !d) return dayKey
+  return new Date(y, m - 1, d).toLocaleString('en-CA', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+/** Group already-sorted (newest-first) imports by local upload day; preserves order. */
+function groupByUploadDay(
+  items: StatementImport[],
+): { dayKey: string; label: string; items: StatementImport[] }[] {
+  const map = new Map<string, StatementImport[]>()
+  for (const item of items) {
+    const key = uploadDayKey(item.uploadedAt)
+    const list = map.get(key)
+    if (list) list.push(item)
+    else map.set(key, [item])
+  }
+  return [...map.entries()].map(([dayKey, groupItems]) => ({
+    dayKey,
+    label: uploadDayLabel(dayKey),
+    items: groupItems,
+  }))
+}
+
 function isScreenshotImport(item: StatementImport): boolean {
   if (item.sourceKind === 'screenshot') return true
   if (item.sourceKind === 'statement') return false
@@ -53,68 +94,78 @@ function ImportList({
     )
   }
 
+  const groups = groupByUploadDay(items)
+
   return (
-    <ul className="import-list">
-      {items.map((item) => {
-        const person =
-          PEOPLE.find((p) => p.id === item.personId)?.name ?? item.personId
-        const account =
-          getAllAccounts().find((a) => a.id === item.primaryAccountId) ?? null
-        const live = liveCounts?.get(item.id)
-        const count = live ?? item.transactionCount
-        const countMismatch =
-          live !== undefined && live !== item.transactionCount
-        return (
-          <li key={item.id} className="import-row">
-            <div className="import-main">
-              <button
-                type="button"
-                className="import-title-btn"
-                onClick={() => onViewStatement(item.id)}
-              >
-                {item.fileName}
-              </button>
-              <div className="import-meta">
-                {person}
-                {' · '}
-                <span className="icon" aria-hidden>
-                  {account?.icon ?? accountIcon(item.primaryAccountId)}
-                </span>{' '}
-                {account?.label ?? accountLabel(item.primaryAccountId)}
-                {' · '}
-                {count} charge{count === 1 ? '' : 's'}
-                {countMismatch
-                  ? ` (${item.transactionCount} recorded at import)`
-                  : ''}
-                {' · '}
-                {formatMoney(Math.abs(item.netAmount))}
-                {item.netAmount < 0 ? ' net credit' : ''}
-                {' · '}
-                {item.monthIds.map(monthLabel).join(', ')}
-                {' · '}
-                {uploadedLabel(item.uploadedAt)}
-              </div>
-            </div>
-            <div className="import-actions">
-              <button
-                type="button"
-                className="primary"
-                onClick={() => onViewStatement(item.id)}
-              >
-                View
-              </button>
-              <button
-                type="button"
-                className="ghost danger"
-                onClick={() => onRemove(item.id)}
-              >
-                Remove
-              </button>
-            </div>
-          </li>
-        )
-      })}
-    </ul>
+    <div className="import-day-groups">
+      {groups.map((group) => (
+        <div key={group.dayKey} className="import-day-group">
+          <h4 className="import-day-label">{group.label}</h4>
+          <ul className="import-list">
+            {group.items.map((item) => {
+              const person =
+                PEOPLE.find((p) => p.id === item.personId)?.name ?? item.personId
+              const account =
+                getAllAccounts().find((a) => a.id === item.primaryAccountId) ??
+                null
+              const live = liveCounts?.get(item.id)
+              const count = live ?? item.transactionCount
+              const countMismatch =
+                live !== undefined && live !== item.transactionCount
+              return (
+                <li key={item.id} className="import-row">
+                  <div className="import-main">
+                    <button
+                      type="button"
+                      className="import-title-btn"
+                      onClick={() => onViewStatement(item.id)}
+                    >
+                      {item.fileName}
+                    </button>
+                    <div className="import-meta">
+                      {person}
+                      {' · '}
+                      <span className="icon" aria-hidden>
+                        {account?.icon ?? accountIcon(item.primaryAccountId)}
+                      </span>{' '}
+                      {account?.label ?? accountLabel(item.primaryAccountId)}
+                      {' · '}
+                      {count} charge{count === 1 ? '' : 's'}
+                      {countMismatch
+                        ? ` (${item.transactionCount} recorded at import)`
+                        : ''}
+                      {' · '}
+                      {formatMoney(Math.abs(item.netAmount))}
+                      {item.netAmount < 0 ? ' net credit' : ''}
+                      {' · '}
+                      {item.monthIds.map(monthLabel).join(', ')}
+                      {' · '}
+                      {uploadedLabel(item.uploadedAt)}
+                    </div>
+                  </div>
+                  <div className="import-actions">
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => onViewStatement(item.id)}
+                    >
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost danger"
+                      onClick={() => onRemove(item.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
   )
 }
 
