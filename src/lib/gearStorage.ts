@@ -7,6 +7,7 @@ import {
   formatGearItemLabel,
   GEAR_KINDS,
   gearTagsEqual,
+  hasGearTags,
   kindLabel,
 } from './gearTags'
 import type {
@@ -770,11 +771,26 @@ export interface VolumeLeaderInsight {
   totalSold: number
 }
 
+export interface BrandProfitInsight {
+  key: string
+  label: string
+  flipCount: number
+  profit: number
+  sold: number
+  purchased: number
+}
+
 export interface GearSalesInsights {
   mostSuccessful: CompletedFlipInsight[]
   byKind: VolumeLeaderInsight[]
   byBrandModel: VolumeLeaderInsight[]
+  /** Sell volume aggregated by brand tag only (excludes unbranded). */
+  byBrand: VolumeLeaderInsight[]
+  /** Linked-flip profit aggregated by brand tag. */
+  brandProfit: BrandProfitInsight[]
   fastest: CompletedFlipInsight[]
+  /** Buy/sell rows missing tags or a brand — Insights is weaker without them. */
+  needsTagCount: number
 }
 
 function parseYmd(value?: string | null): string {
@@ -913,6 +929,65 @@ function brandModelKey(
   return { key: `item:${normalizeCashItem(text)}`, label: text }
 }
 
+/** Brand tag only — skips unbranded sells so charts stay brand-focused. */
+function brandOnlyKey(
+  sell: GearCashMove,
+): { key: string; label: string } | null {
+  const brand = sell.tags?.brand?.trim()
+  if (!brand) return null
+  return { key: `brand:${brand.toLowerCase()}`, label: brand }
+}
+
+function brandProfitLeaders(
+  flips: CompletedFlipInsight[],
+): BrandProfitInsight[] {
+  const map = new Map<string, BrandProfitInsight>()
+  for (const flip of flips) {
+    const brand = flip.tags?.brand?.trim()
+    if (!brand) continue
+    const key = `brand:${brand.toLowerCase()}`
+    const prev = map.get(key)
+    if (prev) {
+      prev.flipCount += 1
+      prev.profit = Math.round((prev.profit + flip.profit) * 100) / 100
+      prev.sold = Math.round((prev.sold + flip.sold) * 100) / 100
+      prev.purchased =
+        Math.round((prev.purchased + flip.purchased) * 100) / 100
+    } else {
+      map.set(key, {
+        key,
+        label: brand,
+        flipCount: 1,
+        profit: flip.profit,
+        sold: flip.sold,
+        purchased: flip.purchased,
+      })
+    }
+  }
+  return [...map.values()].sort((a, b) => {
+    if (b.profit !== a.profit) return b.profit - a.profit
+    if (b.flipCount !== a.flipCount) return b.flipCount - a.flipCount
+    return a.label.localeCompare(b.label)
+  })
+}
+
+/**
+ * Buy/sell rows that are untagged or missing a brand — Insights
+ * (especially brand charts) is less accurate without them.
+ */
+export function cashMoveNeedsInsightTags(move: GearCashMove): boolean {
+  if (move.direction !== 'in' && move.direction !== 'out') return false
+  if (!hasGearTags(move.tags)) return true
+  return !move.tags?.brand?.trim()
+}
+
+export function countCashNeedingInsightTags(cash: GearCashMove[]): number {
+  return cash.reduce(
+    (n, m) => n + (cashMoveNeedsInsightTags(m) ? 1 : 0),
+    0,
+  )
+}
+
 function kindVolumeKey(
   sell: GearCashMove,
 ): { key: string; label: string } | null {
@@ -967,7 +1042,10 @@ export function gearSalesInsights(
     mostSuccessful,
     byKind: volumeLeaders(sells, kindVolumeKey),
     byBrandModel: volumeLeaders(sells, brandModelKey),
+    byBrand: volumeLeaders(sells, brandOnlyKey),
+    brandProfit: brandProfitLeaders(flips),
     fastest,
+    needsTagCount: countCashNeedingInsightTags(cash),
   }
 }
 

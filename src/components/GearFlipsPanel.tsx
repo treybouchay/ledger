@@ -30,6 +30,8 @@ import {
   sumNullable,
   syncPlannerMonths,
   unlinkCashMove,
+  cashMoveNeedsInsightTags,
+  type BrandProfitInsight,
   type CompletedFlipInsight,
   type GearInsightsPeriod,
   type SellItemSuggestion,
@@ -675,6 +677,8 @@ function CashSearchField({
 
 type CashDateSort = 'asc' | 'desc'
 type CashSearchScope = 'both' | 'buys' | 'sells'
+/** Gear item tags quality filter (Insights → Cash CTA). */
+type ItemTagFilter = 'all' | 'needs_tags'
 
 /** Same priority as status tags on buy rows (keep → sold → listing). */
 type BuyCashTag = 'not_listed' | 'listed' | 'sold' | 'kept'
@@ -694,6 +698,19 @@ const BUY_TAG_FILTER_OPTIONS: readonly {
   { id: 'listed', label: 'Listed', title: 'Listed for sale' },
   { id: 'sold', label: 'Sold', title: 'Sold — linked to a sell' },
   { id: 'kept', label: 'Kept', title: 'Kept — not for sale' },
+]
+
+const ITEM_TAG_FILTER_OPTIONS: readonly {
+  id: ItemTagFilter
+  label: string
+  title: string
+}[] = [
+  { id: 'all', label: 'All', title: 'All rows' },
+  {
+    id: 'needs_tags',
+    label: 'Needs tags',
+    title: 'Untagged or missing a brand',
+  },
 ]
 
 function buyCashTag(
@@ -771,6 +788,36 @@ function CashBuyTagFilter({
     >
       <span className="cash-date-sort-label">Tag</span>
       {BUY_TAG_FILTER_OPTIONS.map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          className={`cash-date-sort-btn${value === opt.id ? ' active' : ''}`}
+          aria-pressed={value === opt.id}
+          title={opt.title}
+          onClick={() => onChange(opt.id)}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function CashItemTagFilter({
+  value,
+  onChange,
+}: {
+  value: ItemTagFilter
+  onChange: (next: ItemTagFilter) => void
+}) {
+  return (
+    <div
+      className="cash-date-sort cash-buy-tag-filter"
+      role="group"
+      aria-label="Filter by item tags"
+    >
+      <span className="cash-date-sort-label">Item tags</span>
+      {ITEM_TAG_FILTER_OPTIONS.map((opt) => (
         <button
           key={opt.id}
           type="button"
@@ -1828,6 +1875,8 @@ function CashLedger({
   onChangeMoves,
   onKeepBuy,
   onViewReceipt,
+  itemTagFilter,
+  onItemTagFilterChange,
 }: {
   openingBalance: number
   moves: GearCashMove[]
@@ -1837,6 +1886,8 @@ function CashLedger({
   onChangeMoves: (moves: GearCashMove[]) => void
   onKeepBuy: (move: GearCashMove) => void
   onViewReceipt: () => void
+  itemTagFilter: ItemTagFilter
+  onItemTagFilterChange: (next: ItemTagFilter) => void
 }) {
   const [mode, setMode] = useState<'in' | 'out'>('out')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -1977,6 +2028,12 @@ function CashLedger({
         const tag = buyCashTag(move, moves, excludedBuys)
         if (tag !== buyTagFilter) return false
       }
+      if (
+        itemTagFilter === 'needs_tags' &&
+        !cashMoveNeedsInsightTags(move)
+      ) {
+        return false
+      }
       return true
     })
     return sortCashMovesForDisplay(filtered, buyDateSort)
@@ -1988,6 +2045,7 @@ function CashLedger({
     excludedBuys,
     filterDateFrom,
     filterItem,
+    itemTagFilter,
     moves,
   ])
 
@@ -2000,6 +2058,12 @@ function CashLedger({
       }
       if (filterItem && normalizeCashItem(move.item) !== filterItem) return false
       if (q && !cashMoveMatchesSearch(move, q)) return false
+      if (
+        itemTagFilter === 'needs_tags' &&
+        !cashMoveNeedsInsightTags(move)
+      ) {
+        return false
+      }
       return true
     })
     return sortCashMovesForDisplay(filtered, sellDateSort)
@@ -2009,6 +2073,7 @@ function CashLedger({
     sellDateSort,
     filterDateFrom,
     filterItem,
+    itemTagFilter,
   ])
 
   const filtersActive = Boolean(
@@ -2018,7 +2083,8 @@ function CashLedger({
       filterSearchBuys.trim() ||
       filterSearchSells.trim() ||
       filterSearchScope !== 'both' ||
-      searchSplit,
+      searchSplit ||
+      itemTagFilter !== 'all',
   )
   const searchAppliesToBuys = Boolean(buySearchQuery.trim())
   const searchAppliesToSells = Boolean(sellSearchQuery.trim())
@@ -2064,12 +2130,14 @@ function CashLedger({
     setFilterSearchSells('')
     setFilterSearchScope('both')
     setSearchSplit(false)
+    onItemTagFilterChange('all')
   }
   const buyFiltersActive =
     Boolean(filterDateFrom || filterItem || searchAppliesToBuys) ||
-    buyTagFilter !== 'all'
+    buyTagFilter !== 'all' ||
+    itemTagFilter !== 'all'
   const sellFiltersActive = Boolean(
-    filterDateFrom || filterItem || searchAppliesToSells,
+    filterDateFrom || filterItem || searchAppliesToSells || itemTagFilter !== 'all',
   )
   const filteredMoneyOut = sumNullable(filteredBuys.map((m) => m.amount))
   const filteredMoneyIn = sumNullable(filteredSells.map((m) => m.amount))
@@ -3391,6 +3459,10 @@ function CashLedger({
                 </div>
               </label>
             )}
+            <CashItemTagFilter
+              value={itemTagFilter}
+              onChange={onItemTagFilterChange}
+            />
             {filtersActive ? (
               <button
                 type="button"
@@ -3551,7 +3623,156 @@ function InsightsVolumeRow({ row }: { row: VolumeLeaderInsight }) {
   )
 }
 
-function InsightsPanel({ moves }: { moves: GearCashMove[] }) {
+function InsightBarRow({
+  label,
+  meta,
+  valueLabel,
+  pct,
+  tone = 'accent',
+}: {
+  label: string
+  meta?: string
+  valueLabel: string
+  pct: number
+  tone?: 'accent' | 'good' | 'bad'
+}) {
+  const widthPct = Math.max(0, Math.min(100, Math.round(pct)))
+  return (
+    <div className="gear-insight-bar">
+      <div className="gear-insight-bar-text">
+        <span className="gear-insight-bar-label">{label}</span>
+        {meta ? <span className="gear-insight-bar-meta">{meta}</span> : null}
+      </div>
+      <div
+        className="gear-insight-bar-track"
+        role="img"
+        aria-label={`${label} ${valueLabel}`}
+      >
+        <span
+          className={`gear-insight-bar-fill ${tone}`}
+          style={{ width: `${widthPct}%` }}
+        />
+      </div>
+      <strong
+        className={`gear-insight-bar-value${
+          tone === 'good' ? ' good' : tone === 'bad' ? ' bad' : ''
+        }`}
+      >
+        {valueLabel}
+      </strong>
+    </div>
+  )
+}
+
+function InsightsBrandCharts({
+  byBrand,
+  brandProfit,
+}: {
+  byBrand: VolumeLeaderInsight[]
+  brandProfit: BrandProfitInsight[]
+}) {
+  const volumeRows = byBrand.slice(0, 10)
+  const profitRows = brandProfit.slice(0, 10)
+  const maxSold = Math.max(...volumeRows.map((r) => r.totalSold), 0)
+  const maxCount = Math.max(...volumeRows.map((r) => r.sellCount), 0)
+  const maxProfitAbs = Math.max(
+    ...profitRows.map((r) => Math.abs(r.profit)),
+    0,
+  )
+
+  if (volumeRows.length === 0 && profitRows.length === 0) {
+    return (
+      <p className="empty-note">
+        No branded sells yet. Tag buys and sells with a brand to see what sells
+        well.
+      </p>
+    )
+  }
+
+  return (
+    <div className="gear-insights-brand-charts">
+      <div className="month-end-chart-block">
+        <h3 className="gear-insights-subhead">Brand sell volume ($)</h3>
+        {volumeRows.length === 0 ? (
+          <p className="empty-note tight">No branded sell volume yet.</p>
+        ) : (
+          <div className="gear-insight-bars" aria-label="Brand sell volume dollars">
+            {volumeRows.map((row) => (
+              <InsightBarRow
+                key={`$vol-${row.key}`}
+                label={row.label}
+                meta={`${row.sellCount} sell${row.sellCount === 1 ? '' : 's'}`}
+                valueLabel={formatMoney(row.totalSold)}
+                pct={maxSold > 0 ? (row.totalSold / maxSold) * 100 : 0}
+                tone="accent"
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="month-end-chart-block">
+        <h3 className="gear-insights-subhead">Brand sell count</h3>
+        {volumeRows.length === 0 ? (
+          <p className="empty-note tight">No branded sell counts yet.</p>
+        ) : (
+          <div className="gear-insight-bars" aria-label="Brand sell counts">
+            {[...volumeRows]
+              .sort((a, b) => {
+                if (b.sellCount !== a.sellCount) return b.sellCount - a.sellCount
+                if (b.totalSold !== a.totalSold) return b.totalSold - a.totalSold
+                return a.label.localeCompare(b.label)
+              })
+              .map((row) => (
+                <InsightBarRow
+                  key={`cnt-${row.key}`}
+                  label={row.label}
+                  meta={formatMoney(row.totalSold)}
+                  valueLabel={`${row.sellCount}`}
+                  pct={maxCount > 0 ? (row.sellCount / maxCount) * 100 : 0}
+                  tone="accent"
+                />
+              ))}
+          </div>
+        )}
+      </div>
+
+      <div className="month-end-chart-block gear-insights-brand-profit">
+        <h3 className="gear-insights-subhead">Brand profit (linked flips)</h3>
+        {profitRows.length === 0 ? (
+          <p className="empty-note tight">
+            No linked branded flips yet. Link buys to sells to rank brand profit.
+          </p>
+        ) : (
+          <div className="gear-insight-bars" aria-label="Brand profit">
+            {profitRows.map((row) => (
+              <InsightBarRow
+                key={`profit-${row.key}`}
+                label={row.label}
+                meta={`${row.flipCount} flip${row.flipCount === 1 ? '' : 's'} · sold ${formatMoney(row.sold)}`}
+                valueLabel={`${row.profit > 0 ? '+' : row.profit < 0 ? '−' : ''}${formatMoney(Math.abs(row.profit))}`}
+                pct={
+                  maxProfitAbs > 0
+                    ? (Math.abs(row.profit) / maxProfitAbs) * 100
+                    : 0
+                }
+                tone={row.profit >= 0 ? 'good' : 'bad'}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function InsightsPanel({
+  moves,
+  onTagUntagged,
+}: {
+  moves: GearCashMove[]
+  onTagUntagged: () => void
+}) {
   const [period, setPeriod] = useState<GearInsightsPeriod>('all')
   const insights = useMemo(
     () => gearSalesInsights(moves, period),
@@ -3561,9 +3782,27 @@ function InsightsPanel({ moves }: { moves: GearCashMove[] }) {
     period === 'all'
       ? 'All time · linked flips for profit & speed; all sells for volume'
       : 'This month · by sell date'
+  const needsTags = insights.needsTagCount
 
   return (
     <div className="layout gear-insights">
+      {needsTags > 0 ? (
+        <div className="callout gear-insights-tag-callout">
+          <p>
+            <strong>
+              {needsTags} buy/sell row{needsTags === 1 ? '' : 's'}
+            </strong>{' '}
+            {needsTags === 1 ? 'is' : 'are'} untagged or missing a brand.
+            Tagging improves Insights accuracy — especially brand charts.
+          </p>
+          <div className="callout-actions">
+            <button type="button" className="primary" onClick={onTagUntagged}>
+              Tag on Cash ledger
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -3590,6 +3829,21 @@ function InsightsPanel({ moves }: { moves: GearCashMove[] }) {
           </div>
         </div>
         <p className="empty-note tight gear-insights-note">{periodNote}</p>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Brands that sell well</h2>
+            <p>Volume and linked-flip profit by brand tag</p>
+          </div>
+        </div>
+        <div className="gear-insights-brand-wrap">
+          <InsightsBrandCharts
+            byBrand={insights.byBrand}
+            brandProfit={insights.brandProfit}
+          />
+        </div>
       </section>
 
       <section className="panel">
@@ -4238,6 +4492,8 @@ export function GearFlipsPanel({
   onReset: () => void
 }) {
   const [sub, setSub] = useState<GearSubTab>(() => readGearSubTab())
+  const [cashItemTagFilter, setCashItemTagFilter] =
+    useState<ItemTagFilter>('all')
   const [monthId, setMonthId] = useState(() => {
     if (state.months.some((m) => m.id === '2026-08')) return '2026-08'
     return state.months[state.months.length - 1]?.id ?? state.months[0]?.id ?? ''
@@ -4427,6 +4683,8 @@ export function GearFlipsPanel({
           onChangeMoves={changeCash}
           onKeepBuy={keepBuy}
           onViewReceipt={() => setSub('history')}
+          itemTagFilter={cashItemTagFilter}
+          onItemTagFilterChange={setCashItemTagFilter}
         />
       ) : null}
 
@@ -4443,7 +4701,15 @@ export function GearFlipsPanel({
         <KeepListPanel keepList={keepList} onChange={changeKeepList} />
       ) : null}
 
-      {sub === 'insights' ? <InsightsPanel moves={state.cash} /> : null}
+      {sub === 'insights' ? (
+        <InsightsPanel
+          moves={state.cash}
+          onTagUntagged={() => {
+            setCashItemTagFilter('needs_tags')
+            setSub('cash')
+          }}
+        />
+      ) : null}
     </div>
   )
 }
