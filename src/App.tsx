@@ -932,6 +932,10 @@ export default function App() {
     setTab('transactions')
   }
 
+  function closeStatementView() {
+    setViewingImportId(null)
+  }
+
   function openStatement(importId: string) {
     const item = imports.find((row) => row.id === importId)
     const linked = transactions.filter((t) => t.importId === importId)
@@ -952,8 +956,16 @@ export default function App() {
     if (item) setPersonFilter(item.personId)
     setTransactionCategoryFilter('all')
     setViewingImportId(importId)
-    setTab('transactions')
   }
+
+  useEffect(() => {
+    if (!viewingImportId) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setViewingImportId(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [viewingImportId])
 
   function clearStatementUndoTimer() {
     if (statementUndoTimerRef.current != null) {
@@ -2905,140 +2917,6 @@ export default function App() {
 
       {tab === 'transactions' && (
         <div className="layout">
-          {viewingImport ? (
-            <section className="panel">
-              <div className="panel-header">
-                <div>
-                  <h2>Statement: {viewingImport.fileName}</h2>
-                  <p>
-                    {PEOPLE.find((p) => p.id === viewingImport.personId)?.name ??
-                      viewingImport.personId}
-                    {' · '}
-                    {statementTransactions.length} charge
-                    {statementTransactions.length === 1 ? '' : 's'}
-                    {' · '}
-                    net {formatMoney(viewingImport.netAmount)}
-                    {' · '}
-                    {statementMonthBreakdown.length > 1
-                      ? statementMonthBreakdown
-                          .map(
-                            (row) =>
-                              `${row.count} in ${monthLabel(row.monthId)}`,
-                          )
-                          .join(' · ')
-                      : viewingImport.monthIds.map(monthLabel).join(', ')}
-                  </p>
-                </div>
-                <div className="import-actions">
-                  <label className="statement-account-field">
-                    Account
-                    <select
-                      value={viewingImport.primaryAccountId}
-                      onChange={(e) =>
-                        reassignStatementAccount(
-                          viewingImport.id,
-                          e.target.value as Transaction['accountId'],
-                        )
-                      }
-                      aria-label="Account for these charges"
-                    >
-                      {(() => {
-                        const forPerson = accountsForPerson(
-                          viewingImport.personId,
-                        )
-                        const ids = new Set(forPerson.map((a) => a.id))
-                        const options = [...forPerson]
-                        if (!ids.has(viewingImport.primaryAccountId)) {
-                          const orphan = getAllAccounts().find(
-                            (a) => a.id === viewingImport.primaryAccountId,
-                          )
-                          if (orphan) options.unshift(orphan)
-                        }
-                        return options.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {accountOptionLabel(a.id)}
-                          </option>
-                        ))
-                      })()}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => setViewingImportId(null)}
-                  >
-                    All transactions
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost danger"
-                    onClick={() => {
-                      void removeImport(viewingImport.id)
-                    }}
-                  >
-                    Remove statement
-                  </button>
-                </div>
-              </div>
-              {statementMonthBreakdown.length > 1 ? (
-                <div className="callout">
-                  <p>
-                    This statement’s {statementTransactions.length} charges span{' '}
-                    {statementMonthBreakdown
-                      .map((row) => `${row.count} in ${monthLabel(row.monthId)}`)
-                      .join(', ')}
-                    . Month overview / Categories only show one month at a time
-                    — use the buttons below or the month picker.
-                    {statementMonthBreakdown.some((row) => {
-                      const y = Number(row.monthId.slice(0, 4))
-                      const nowY = new Date().getFullYear()
-                      return y < nowY - 1 || y > nowY + 1
-                    })
-                      ? ' Dates far from this year usually mean a bad PDF year guess — remove this statement and re-upload after the fix.'
-                      : ''}
-                  </p>
-                  <div className="callout-actions">
-                    {statementMonthBreakdown.map((row) => (
-                      <button
-                        key={row.monthId}
-                        type="button"
-                        className="ghost"
-                        onClick={() => {
-                          setMonthId(row.monthId)
-                          setViewingImportId(null)
-                        }}
-                      >
-                        {monthLabel(row.monthId)} ({row.count})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              <div className="statement-view-with-file">
-                <StatementFilePreview
-                  importId={viewingImport.id}
-                  hasStoredFile={viewingImport.hasStoredFile}
-                  fileName={viewingImport.fileName}
-                />
-                <div className="statement-charges">
-                  {statementTransactions.length === 0 ? (
-                    <p className="empty-note">
-                      No charges found for this statement (it may have been
-                      removed).
-                    </p>
-                  ) : (
-                    <TransactionTable
-                      transactions={statementTransactions}
-                      showCategory
-                      showAccount
-                      onUpdate={updateTransaction}
-                    />
-                  )}
-                </div>
-              </div>
-            </section>
-          ) : (
-            <>
               <div className="panel-header bare">
                 <div>
                   <h2>Transactions</h2>
@@ -3356,8 +3234,6 @@ export default function App() {
                   </section>
                 )
               })}
-            </>
-          )}
         </div>
       )}
 
@@ -3632,6 +3508,160 @@ export default function App() {
           </section>
         </div>
       )}
+
+      {viewingImport ? (
+        <div
+          className="cash-link-modal-backdrop"
+          role="presentation"
+          onClick={closeStatementView}
+        >
+          <div
+            className="cash-link-modal statement-import-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="statement-import-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cash-link-modal-header">
+              <div>
+                <h3 id="statement-import-modal-title">
+                  {viewingImport.sourceKind === 'screenshot'
+                    ? 'Screenshot'
+                    : 'Statement'}
+                  : {viewingImport.fileName}
+                </h3>
+                <p>
+                  {PEOPLE.find((p) => p.id === viewingImport.personId)?.name ??
+                    viewingImport.personId}
+                  {' · '}
+                  {statementTransactions.length} charge
+                  {statementTransactions.length === 1 ? '' : 's'}
+                  {' · '}
+                  net {formatMoney(viewingImport.netAmount)}
+                  {' · '}
+                  {statementMonthBreakdown.length > 1
+                    ? statementMonthBreakdown
+                        .map(
+                          (row) =>
+                            `${row.count} in ${monthLabel(row.monthId)}`,
+                        )
+                        .join(' · ')
+                    : viewingImport.monthIds.map(monthLabel).join(', ')}
+                </p>
+              </div>
+              <div className="import-actions">
+                <label className="statement-account-field">
+                  Account
+                  <select
+                    value={viewingImport.primaryAccountId}
+                    onChange={(e) =>
+                      reassignStatementAccount(
+                        viewingImport.id,
+                        e.target.value as Transaction['accountId'],
+                      )
+                    }
+                    aria-label="Account for these charges"
+                  >
+                    {(() => {
+                      const forPerson = accountsForPerson(
+                        viewingImport.personId,
+                      )
+                      const ids = new Set(forPerson.map((a) => a.id))
+                      const options = [...forPerson]
+                      if (!ids.has(viewingImport.primaryAccountId)) {
+                        const orphan = getAllAccounts().find(
+                          (a) => a.id === viewingImport.primaryAccountId,
+                        )
+                        if (orphan) options.unshift(orphan)
+                      }
+                      return options.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {accountOptionLabel(a.id)}
+                        </option>
+                      ))
+                    })()}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={closeStatementView}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="ghost danger"
+                  onClick={() => {
+                    void removeImport(viewingImport.id)
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+
+            <div className="cash-link-modal-body statement-import-modal-body">
+              {statementMonthBreakdown.length > 1 ? (
+                <div className="callout">
+                  <p>
+                    This import’s {statementTransactions.length} charges span{' '}
+                    {statementMonthBreakdown
+                      .map((row) => `${row.count} in ${monthLabel(row.monthId)}`)
+                      .join(', ')}
+                    . Month overview / Categories only show one month at a time
+                    — use the buttons below or the month picker.
+                    {statementMonthBreakdown.some((row) => {
+                      const y = Number(row.monthId.slice(0, 4))
+                      const nowY = new Date().getFullYear()
+                      return y < nowY - 1 || y > nowY + 1
+                    })
+                      ? ' Dates far from this year usually mean a bad PDF year guess — remove this import and re-upload after the fix.'
+                      : ''}
+                  </p>
+                  <div className="callout-actions">
+                    {statementMonthBreakdown.map((row) => (
+                      <button
+                        key={row.monthId}
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          setMonthId(row.monthId)
+                          closeStatementView()
+                        }}
+                      >
+                        {monthLabel(row.monthId)} ({row.count})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <div className="statement-view-with-file">
+                <StatementFilePreview
+                  importId={viewingImport.id}
+                  hasStoredFile={viewingImport.hasStoredFile}
+                  fileName={viewingImport.fileName}
+                />
+                <div className="statement-charges">
+                  {statementTransactions.length === 0 ? (
+                    <p className="empty-note">
+                      No charges found for this import (it may have been
+                      removed).
+                    </p>
+                  ) : (
+                    <TransactionTable
+                      transactions={statementTransactions}
+                      showCategory
+                      showAccount
+                      onUpdate={updateTransaction}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {dupeCheckOpen ? (
         <div
