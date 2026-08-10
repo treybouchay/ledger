@@ -1,9 +1,17 @@
 /**
- * OCR preprocess checks: Amex green credit amounts must stay dark.
+ * OCR preprocess checks: Amex green credit amounts must stay dark,
+ * and a minus must be inked so Tesseract keeps the credit sign.
  * Run: npx tsx src/lib/ocrScreenshot.test.ts
  */
 import assert from 'node:assert/strict'
-import { processImageDataForOcr, rgbaToOcrGray } from './ocrScreenshot'
+import {
+  findGreenCreditAnchors,
+  inkMinusAt,
+  isCreditGreenPixel,
+  prepareImageDataForOcr,
+  processImageDataForOcr,
+  rgbaToOcrGray,
+} from './ocrScreenshot'
 
 // Synthetic Amex credit green (typical app ink) → near black.
 {
@@ -21,7 +29,11 @@ import { processImageDataForOcr, rgbaToOcrGray } from './ocrScreenshot'
 {
   const y = rgbaToOcrGray(228, 239, 233)
   assert.ok(y > 200, `expected light mint chrome, got ${y}`)
+  assert.equal(isCreditGreenPixel(228, 239, 233), false)
 }
+
+assert.equal(isCreditGreenPixel(40, 150, 85), true)
+assert.equal(isCreditGreenPixel(28, 28, 28), false)
 
 // White stays white.
 {
@@ -85,6 +97,58 @@ function makeImageData(
     whiteOut < 80,
     `dark-mode white label should invert to dark, got ${whiteOut}`,
   )
+}
+
+// Two green amount blobs on the right → two minus anchors (twin Amazon credits).
+{
+  const w = 120
+  const h = 80
+  const data = new Uint8ClampedArray(w * h * 4)
+  // mint background
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 232
+    data[i + 1] = 241
+    data[i + 2] = 236
+    data[i + 3] = 255
+  }
+  const paintGreenRect = (x0: number, y0: number, x1: number, y1: number) => {
+    for (let y = y0; y <= y1; y += 1) {
+      for (let x = x0; x <= x1; x += 1) {
+        const i = (y * w + x) * 4
+        data[i] = 40
+        data[i + 1] = 150
+        data[i + 2] = 85
+      }
+    }
+  }
+  // Right-side amount-sized green runs (two rows)
+  paintGreenRect(70, 20, 105, 32)
+  paintGreenRect(70, 45, 105, 57)
+
+  const anchors = findGreenCreditAnchors(data, w, h)
+  assert.equal(anchors.length, 2, `expected 2 anchors, got ${anchors.length}`)
+  assert.ok(anchors[0].x < 70)
+  assert.ok(anchors[1].x < 70)
+
+  const color = { data: new Uint8ClampedArray(data), width: w, height: h } as ImageData
+  const prepared = prepareImageDataForOcr(color)
+  // Pixels at inked minus should be black
+  for (const a of anchors) {
+    const i = (a.y * w + a.x) * 4
+    assert.ok(
+      prepared.data[i] < 40,
+      `expected inked minus at (${a.x},${a.y}), got ${prepared.data[i]}`,
+    )
+  }
+}
+
+// inkMinusAt writes black bar
+{
+  const w = 40
+  const h = 20
+  const data = new Uint8ClampedArray(w * h * 4).fill(255)
+  inkMinusAt(data, w, h, 20, 10)
+  assert.ok(data[(10 * w + 20) * 4] === 0)
 }
 
 console.log('ocrScreenshot.test.ts: all assertions passed')

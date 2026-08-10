@@ -335,4 +335,43 @@ WHITBY
   assert.equal(amazon!.amount, 42.18)
 }
 
+// Regression: green OCR often loses the thin minus → positive $amounts.
+// Pipeline must ink `-` before green clusters; once present, both are refunds.
+const amexOcrAfterGreenMinusInk = `
+SimplyCash Preferred Card
+American Express
+6 Aug
+TIM HORTONS
+$9.13
+Pending
+AMZN MKTP CA 866-216-1072
+-$41.19
+AMZN MKTP CA 866-216-1072
+-$29.37
+OPENAI CHATGPT SUBSCR
+SAN FRANCISCO
+$32.61
+PETRO-CANADA 65696 WHITBY
+$15.80
+PETRO-CANADA 65696 WHITBY
+$65.06
+`
+
+{
+  const rows = parseScreenshotText(amexOcrAfterGreenMinusInk)
+  assert.equal(rows.length, 5)
+  const amazons = rows.filter((r) => /amzn/i.test(r.merchant))
+  assert.equal(amazons.length, 2)
+  assert.ok(
+    amazons.every((r) => r.isRefund),
+    'both Amazon credits must be refunds after minus-ink OCR',
+  )
+  assert.deepEqual(
+    amazons.map((r) => r.amount).sort((a, b) => a - b),
+    [29.37, 41.19],
+  )
+  const drafts = draftsFromParsed(rows, 'trevor', 'amex', [])
+  assert.ok(drafts.filter((d) => /amzn/i.test(d.merchant)).every((d) => d.isRefund))
+}
+
 console.log('parseScreenshotText.test.ts: all assertions passed')

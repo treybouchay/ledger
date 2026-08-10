@@ -77,7 +77,14 @@ export async function parseStatementFile(
       }
     }
 
-    if (looksLikeAmex(text) || name.includes('amex')) {
+    // Phone Amex app activity (SimplyCash / Pending / “6 Aug”) must use the
+    // screenshot section parser — it understands green −$ credits. The PDF
+    // Amex statement parser misses those refunds and can steal the route.
+    const amexAppShot =
+      /simplycash|\bpending\b|\b\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i.test(
+        text,
+      )
+    if (!amexAppShot && (looksLikeAmex(text) || name.includes('amex'))) {
       const rows = parseAmexStatement(text)
       if (rows.length > 0) {
         return {

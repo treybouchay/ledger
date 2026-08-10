@@ -7,9 +7,10 @@
  * Tesseract sees black text on white.
  *
  * Amex credits are green (`−$41.19`). Standard luma turns that green into
- * mid-gray that contrast-stretch then washes out — twin Amazon returns lose
- * one amount. We gray with R/B (ignore G) and further darken green-chroma
- * pixels so credit amounts stay ink-dark.
+ * mid-gray that washes out. We gray with R/B (ignore G) and darken green
+ * chroma so digits stay ink-dark — but the thin minus often still disappears.
+ * Before OCR we ink a bold ASCII `-` just left of each green amount cluster
+ * so credits survive as `-$41.19` for the refund parser.
  */
 import { createWorker, PSM } from 'tesseract.js'
 
@@ -46,6 +47,14 @@ export async function extractTextFromImage(
   }
 }
 
+/** True for Amex-style credit-green ink (not mint chrome). */
+export function isCreditGreenPixel(r: number, g: number, b: number): boolean {
+  const y = 0.299 * r + 0.587 * g + 0.114 * b
+  if (y < 25 || y > 200) return false
+  const greenness = g - (r + b) / 2
+  return greenness > 12 && g > r + 12 && g > b + 8
+}
+
 /**
  * Map one sRGB pixel to OCR gray. Exported for unit tests.
  * Green Amex credit ink → near-black; mint/white chrome stays light.
@@ -60,6 +69,91 @@ export function rgbaToOcrGray(r: number, g: number, b: number): number {
   return y
 }
 
+/**
+ * Find left edges of green amount clusters (typically right-aligned credits).
+ * Returns anchors where a minus should be inked.
+ */
+export function findGreenCreditAnchors(
+  colorData: Uint8ClampedArray,
+  width: number,
+  height: number,
+): Array<{ x: number; y: number }> {
+  // Bucket green pixels into horizontal bands (~one text line).
+  const bandH = Math.max(6, Math.round(height * 0.012))
+  type Band = { minX: number; maxX: number; minY: number; maxY: number; n: number }
+  const bands = new Map<number, Band>()
+
+  const xMin = Math.floor(width * 0.35) // amounts sit on the right half
+  for (let y = 0; y < height; y += 1) {
+    for (let x = xMin; x < width; x += 1) {
+      const i = (y * width + x) * 4
+      if (!isCreditGreenPixel(colorData[i], colorData[i + 1], colorData[i + 2])) {
+        continue
+      }
+      const key = Math.floor(y / bandH)
+      const b = bands.get(key)
+      if (!b) {
+        bands.set(key, { minX: x, maxX: x, minY: y, maxY: y, n: 1 })
+      } else {
+        b.minX = Math.min(b.minX, x)
+        b.maxX = Math.max(b.maxX, x)
+        b.minY = Math.min(b.minY, y)
+        b.maxY = Math.max(b.maxY, y)
+        b.n += 1
+      }
+    }
+  }
+
+  const anchors: Array<{ x: number; y: number }> = []
+  for (const b of bands.values()) {
+    const bw = b.maxX - b.minX + 1
+    const bh = b.maxY - b.minY + 1
+    // Amount glyphs: wide-ish run, not a speck / not a huge green panel.
+    if (b.n < 18 || bw < 12 || bw > width * 0.45 || bh < 4 || bh > bandH * 3) {
+      continue
+    }
+    const cx = Math.max(2, b.minX - Math.max(6, Math.round(bh * 0.7)))
+    const cy = Math.round((b.minY + b.maxY) / 2)
+    anchors.push({ x: cx, y: cy })
+  }
+
+  // Merge anchors on nearly the same line (one minus per credit row).
+  anchors.sort((a, b) => a.y - b.y || a.x - b.x)
+  const merged: Array<{ x: number; y: number }> = []
+  for (const a of anchors) {
+    const prev = merged[merged.length - 1]
+    if (prev && Math.abs(prev.y - a.y) <= bandH) {
+      prev.x = Math.min(prev.x, a.x)
+      prev.y = Math.round((prev.y + a.y) / 2)
+      continue
+    }
+    merged.push({ ...a })
+  }
+  return merged
+}
+
+/** Draw a thick horizontal minus into grayscale ImageData. */
+export function inkMinusAt(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  cx: number,
+  cy: number,
+): void {
+  const thickness = Math.max(2, Math.round(height * 0.003))
+  const halfW = Math.max(4, Math.round(height * 0.008))
+  for (let dy = -thickness; dy <= thickness; dy += 1) {
+    const y = cy + dy
+    if (y < 0 || y >= height) continue
+    for (let dx = -halfW; dx <= halfW; dx += 1) {
+      const x = cx + dx
+      if (x < 0 || x >= width) continue
+      const i = (y * width + x) * 4
+      data[i] = data[i + 1] = data[i + 2] = 0
+    }
+  }
+}
+
 /** Mutates ImageData in place: grayscale + invert-if-dark + contrast. */
 export function processImageDataForOcr(imageData: ImageData): void {
   const { data } = imageData
@@ -72,9 +166,7 @@ export function processImageDataForOcr(imageData: ImageData): void {
     const r = data[i]
     const g = data[i + 1]
     const b = data[i + 2]
-    const greenness = g - (r + b) / 2
-    // Mark Amex-style credit ink before invert so we can re-ink afterward.
-    if (greenness > 10 && g > r + 8 && g > b + 5) {
+    if (isCreditGreenPixel(r, g, b) || (g - (r + b) / 2 > 10 && g > r + 8 && g > b + 5)) {
       wasCreditGreen[p] = 1
     }
     const y = rgbaToOcrGray(r, g, b)
@@ -96,6 +188,27 @@ export function processImageDataForOcr(imageData: ImageData): void {
     y = Math.max(0, Math.min(255, y))
     data[i] = data[i + 1] = data[i + 2] = y
   }
+}
+
+/**
+ * Full preprocess: color → gray (green-aware) → ink `-` before green credits.
+ * Exported for tests with synthetic ImageData pairs.
+ */
+export function prepareImageDataForOcr(color: ImageData): ImageData {
+  const { width, height } = color
+  const colorCopy = new Uint8ClampedArray(color.data)
+  const gray = {
+    data: new Uint8ClampedArray(color.data),
+    width,
+    height,
+  } as ImageData
+  processImageDataForOcr(gray)
+
+  const anchors = findGreenCreditAnchors(colorCopy, width, height)
+  for (const a of anchors) {
+    inkMinusAt(gray.data, width, height, a.x, a.y)
+  }
+  return gray
 }
 
 async function prepareImageForOcr(file: File | Blob): Promise<Blob> {
@@ -120,10 +233,9 @@ async function prepareImageForOcr(file: File | Blob): Promise<Blob> {
     ctx.drawImage(bitmap, 0, 0, width, height)
     bitmap.close()
 
-    const imageData = ctx.getImageData(0, 0, width, height)
-    processImageDataForOcr(imageData)
-
-    ctx.putImageData(imageData, 0, 0)
+    const color = ctx.getImageData(0, 0, width, height)
+    const prepared = prepareImageDataForOcr(color)
+    ctx.putImageData(prepared, 0, 0)
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob((b) => resolve(b), 'image/png'),
     )
