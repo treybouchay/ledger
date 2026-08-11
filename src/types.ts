@@ -249,7 +249,15 @@ export interface GearMonth {
   sales: GearSale[]
 }
 
-export type GearCashType = 'DEPOSIT' | 'BUY' | 'SELL' | 'FEE' | 'SHIP' | string
+export type GearCashType =
+  | 'DEPOSIT'
+  | 'BUY'
+  | 'SELL'
+  | 'FEE'
+  | 'SHIP'
+  /** Cash float spent on non–goalie-gear (not inventory). */
+  | 'OTHER'
+  | string
 
 /** Buy inventory listing status for flip organization (not used on sells). */
 export type GearListingStatus = 'listed' | 'not_listed'
@@ -258,6 +266,10 @@ export type GearListingStatus = 'listed' | 'not_listed'
 export interface GearCashMove {
   id: string
   date?: string | null
+  /**
+   * BUY / SELL for gear inventory; OTHER for non-gear cash-outs
+   * (reduces cash on hand, never enters open inventory / Insights as gear).
+   */
   type: GearCashType
   item?: string | null
   /** Structured product tags — preferred over free-text alone. */
@@ -278,6 +290,7 @@ export interface GearCashMove {
   /**
    * Flip inventory listing for buys: listed for sale vs not yet listed.
    * Ignored when the buy is on the keep list; null/undefined displays as not listed.
+   * Not used for non-gear (`OTHER`) spends.
    */
   listingStatus?: GearListingStatus | null
   /** Optional free-text note on a buy or sell row. */

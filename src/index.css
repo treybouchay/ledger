@@ -3472,7 +3472,7 @@ select {
 
 .cash-mode-toggle {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 0.55rem;
 }
 
@@ -3506,6 +3506,17 @@ select {
 .cash-mode.out.active {
   border-color: var(--bad);
   background: #fbf1ef;
+}
+
+.cash-mode.other.active {
+  border-color: #9a7b4f;
+  background: #f7f1e8;
+}
+
+@media (max-width: 720px) {
+  .cash-mode-toggle {
+    grid-template-columns: 1fr;
+  }
 }
 
 .cash-split {
@@ -3725,7 +3736,8 @@ select {
 }
 
 .cash-move.buy-row,
-.cash-move.sell-row {
+.cash-move.sell-row,
+.cash-move.other-row {
   background: var(--surface-warm);
 }
 
@@ -4189,6 +4201,12 @@ select {
   color: #4a5f72;
   background: color-mix(in srgb, #d5e0ea 70%, #fff);
   border-color: color-mix(in srgb, #8aa0b4 35%, transparent);
+}
+
+.status-tag-non-gear {
+  color: #7a5c32;
+  background: color-mix(in srgb, #e8d9c4 70%, #fff);
+  border-color: color-mix(in srgb, #9a7b4f 35%, transparent);
 }
 
 .status-tag-manual {
@@ -5018,6 +5036,11 @@ select {
 .cash-type.out {
   background: #f7e8e5;
   color: var(--bad);
+}
+
+.cash-type.other {
+  background: #f3ebe0;
+  color: #7a5c32;
 }
 
 .cash-move-date {

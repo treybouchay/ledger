@@ -185,6 +185,20 @@ export function syncPlannerMonths(
   return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
 }
 
+/** Cash-out types that are not goalie-gear inventory buys. */
+const NON_GEAR_OUT_TYPES = new Set(['OTHER', 'FEE', 'SHIP'])
+
+/** Cash float spent outside gear inventory (type OTHER, or legacy FEE/SHIP). */
+export function isNonGearSpend(move: GearCashMove): boolean {
+  if (move.direction !== 'out') return false
+  return NON_GEAR_OUT_TYPES.has(String(move.type ?? '').toUpperCase())
+}
+
+/** Goalie-gear inventory buy (money out that can enter open inventory). */
+export function isGearInventoryBuy(move: GearCashMove): boolean {
+  return move.direction === 'out' && !isNonGearSpend(move)
+}
+
 /** Same rule as the cash ledger UI: missing/null → not listed. */
 export function effectiveListingStatus(
   move: GearCashMove,
@@ -201,7 +215,7 @@ export function isOpenNotListedBuy(
   moves: GearCashMove[],
   keepList: readonly GearKeepItem[],
 ): boolean {
-  if (move.direction !== 'out') return false
+  if (!isGearInventoryBuy(move)) return false
   if (keptBuyIds(keepList).has(move.id)) return false
   if (cashGroupOpposites(moves, move).length > 0) return false
   return effectiveListingStatus(move) === 'not_listed'
@@ -217,7 +231,7 @@ export function isEligibleProjectedAttachBuy(
   moves: GearCashMove[],
   keepList: readonly GearKeepItem[],
 ): boolean {
-  if (move.direction !== 'out') return false
+  if (!isGearInventoryBuy(move)) return false
   if (keptBuyIds(keepList).has(move.id)) return false
   if (cashGroupOpposites(moves, move).length > 0) return false
   return true
@@ -494,20 +508,27 @@ function migrateLegacyCash(raw: unknown): GearCashMove[] | null {
         r.soldVia === 'fb' || r.soldVia === 'kijiji' || r.soldVia === 'ss'
           ? r.soldVia
           : null
+      const type = String(r.type ?? (r.direction === 'in' ? 'SELL' : 'BUY'))
+      const direction = r.direction
+      const nonGear =
+        direction === 'out' &&
+        NON_GEAR_OUT_TYPES.has(type.toUpperCase())
       out.push({
         id: String(r.id ?? `cash-${out.length + 1}`),
         date: (r.date as string | null) ?? null,
-        type: String(r.type ?? (r.direction === 'in' ? 'SELL' : 'BUY')),
+        type: nonGear ? type.toUpperCase() : type,
         item: (r.item as string | null) ?? null,
-        tags: readCashTags(r.tags),
+        tags: nonGear ? null : readCashTags(r.tags),
         amount: Math.abs(r.amount),
-        direction: r.direction,
-        soldVia: r.direction === 'in' ? soldVia : null,
-        linkGroupId: readLinkGroupId(r.linkGroupId),
-        linkedMoveId: readLinkedMoveId(r.linkedMoveId),
-        linkLocked: readLinkLocked(r.linkLocked),
+        direction,
+        soldVia: direction === 'in' ? soldVia : null,
+        linkGroupId: nonGear ? null : readLinkGroupId(r.linkGroupId),
+        linkedMoveId: nonGear ? null : readLinkedMoveId(r.linkedMoveId),
+        linkLocked: nonGear ? true : readLinkLocked(r.linkLocked),
         listingStatus:
-          r.direction === 'out' ? readListingStatus(r.listingStatus) : null,
+          !nonGear && direction === 'out'
+            ? readListingStatus(r.listingStatus)
+            : null,
         notes: readCashNotes(r.notes),
         createdAt: typeof r.createdAt === 'string' ? r.createdAt : null,
       })
@@ -520,24 +541,67 @@ function migrateLegacyCash(raw: unknown): GearCashMove[] | null {
     const direction: 'in' | 'out' = (cin ?? 0) > 0 ? 'in' : 'out'
     const amount = direction === 'in' ? (cin ?? 0) : (cout ?? 0)
     if (amount <= 0) continue
+    const type = String(r.type ?? (direction === 'in' ? 'SELL' : 'BUY'))
+    const nonGear =
+      direction === 'out' &&
+      NON_GEAR_OUT_TYPES.has(type.toUpperCase())
     out.push({
       id: String(r.id ?? `cash-${out.length + 1}`),
       date: (r.date as string | null) ?? null,
-      type: String(r.type ?? (direction === 'in' ? 'SELL' : 'BUY')),
+      type: nonGear ? type.toUpperCase() : type,
       item: (r.item as string | null) ?? null,
-      tags: readCashTags(r.tags),
+      tags: nonGear ? null : readCashTags(r.tags),
       amount,
       direction,
-      linkGroupId: readLinkGroupId(r.linkGroupId),
-      linkedMoveId: readLinkedMoveId(r.linkedMoveId),
-      linkLocked: readLinkLocked(r.linkLocked),
+      linkGroupId: nonGear ? null : readLinkGroupId(r.linkGroupId),
+      linkedMoveId: nonGear ? null : readLinkedMoveId(r.linkedMoveId),
+      linkLocked: nonGear ? true : readLinkLocked(r.linkLocked),
       listingStatus:
-        direction === 'out' ? readListingStatus(r.listingStatus) : null,
+        !nonGear && direction === 'out'
+          ? readListingStatus(r.listingStatus)
+          : null,
       notes: readCashNotes(r.notes),
       createdAt: typeof r.createdAt === 'string' ? r.createdAt : null,
     })
   }
   return out.length ? out : null
+}
+
+/**
+ * Ensure non-gear cash-outs stay out of inventory linking / tags / listing.
+ * Safe to re-run on every load.
+ */
+export function normalizeNonGearCashMoves(
+  moves: GearCashMove[],
+): GearCashMove[] {
+  let changed = false
+  const next = moves.map((m) => {
+    if (!isNonGearSpend(m)) return m
+    const type = String(m.type ?? 'OTHER').toUpperCase()
+    const cleaned: GearCashMove = {
+      ...m,
+      type,
+      tags: null,
+      soldVia: null,
+      linkGroupId: null,
+      linkedMoveId: null,
+      linkLocked: true,
+      listingStatus: null,
+    }
+    if (
+      cleaned.type !== m.type ||
+      cleaned.tags !== m.tags ||
+      cleaned.soldVia !== (m.soldVia ?? null) ||
+      cleaned.linkGroupId !== (m.linkGroupId ?? null) ||
+      cleaned.linkedMoveId !== (m.linkedMoveId ?? null) ||
+      cleaned.linkLocked !== m.linkLocked ||
+      cleaned.listingStatus !== (m.listingStatus ?? null)
+    ) {
+      changed = true
+    }
+    return cleaned
+  })
+  return changed ? next : moves
 }
 
 /** Turn legacy linkedMoveId pairs into shared linkGroupId values. */
@@ -599,7 +663,7 @@ export function cashGroupEconomics(
 } | null {
   const members = cashGroupMembers(moves, move)
   if (members.length < 2) return null
-  const buys = members.filter((m) => m.direction === 'out')
+  const buys = members.filter((m) => isGearInventoryBuy(m))
   const sells = members.filter((m) => m.direction === 'in')
   if (!buys.length || !sells.length) return null
   const purchased =
@@ -974,8 +1038,10 @@ function brandProfitLeaders(
 /**
  * Buy/sell rows that are untagged or missing a brand — Insights
  * (especially brand charts) is less accurate without them.
+ * Non-gear spends are excluded (they are not inventory).
  */
 export function cashMoveNeedsInsightTags(move: GearCashMove): boolean {
+  if (isNonGearSpend(move)) return false
   if (move.direction !== 'in' && move.direction !== 'out') return false
   if (!hasGearTags(move.tags)) return true
   return !move.tags?.brand?.trim()
@@ -1061,6 +1127,7 @@ export function scoreLinkCandidate(
   source: GearCashMove,
   candidate: GearCashMove,
 ): number {
+  if (isNonGearSpend(source) || isNonGearSpend(candidate)) return -Infinity
   if (source.direction === candidate.direction) return -Infinity
 
   let score = 0
@@ -1147,7 +1214,13 @@ export function rankLinkCandidates(
   source: GearCashMove,
 ): Array<{ move: GearCashMove; score: number; suggested: boolean }> {
   const scored = moves
-    .filter((m) => m.id !== source.id && m.direction !== source.direction)
+    .filter(
+      (m) =>
+        m.id !== source.id &&
+        m.direction !== source.direction &&
+        !isNonGearSpend(m) &&
+        !isNonGearSpend(source),
+    )
     .map((move) => {
       const score = scoreLinkCandidate(source, move)
       return { move, score, suggested: score >= 60 }
@@ -1222,7 +1295,7 @@ export function suggestSellItemNames(
   }
 
   for (const buy of moves) {
-    if (buy.direction !== 'out' || buy.linkGroupId) continue
+    if (!isGearInventoryBuy(buy) || buy.linkGroupId) continue
     if (excluded.has(buy.id)) continue
     const label = (buy.item ?? '').trim()
     if (!label) continue
@@ -1239,7 +1312,7 @@ export function suggestSellItemNames(
 
   for (const members of groups.values()) {
     const groupBuys = members.filter(
-      (m) => m.direction === 'out' && !excluded.has(m.id),
+      (m) => isGearInventoryBuy(m) && !excluded.has(m.id),
     )
     const groupSells = members.filter((m) => m.direction === 'in')
     if (!groupBuys.length) continue
@@ -1378,6 +1451,7 @@ export function suggestBuyItemNames(
   }
 
   for (const m of moves) {
+    if (isNonGearSpend(m)) continue
     const label = (m.item ?? '').trim()
     if (!label) continue
     const weight = m.direction === 'out' ? 2 : 1
@@ -1543,7 +1617,7 @@ function groupHasOpposites(members: GearCashMove[]): boolean {
  * Locked rows are left alone; same-name unlocked pairs always link.
  */
 export function autoLinkCashMoves(moves: GearCashMove[]): GearCashMove[] {
-  const migrated = migrateLegacyLinksToGroups(moves)
+  const migrated = migrateLegacyLinksToGroups(normalizeNonGearCashMoves(moves))
   const byId = new Map(
     migrated.map((m) => [
       m.id,
@@ -1586,6 +1660,7 @@ export function autoLinkCashMoves(moves: GearCashMove[]): GearCashMove[] {
   for (const original of migrated) {
     const m = byId.get(original.id)!
     if (used.has(m.id) || m.linkLocked) continue
+    if (isNonGearSpend(m)) continue
     const key = normalizeCashItem(m.item)
     if (!key) continue
     if (m.direction === 'out') {
@@ -1678,6 +1753,7 @@ export function linkCashMoves(
   const a = moves.find((m) => m.id === aId)
   const b = moves.find((m) => m.id === bId)
   if (!a || !b || a.direction === b.direction) return moves
+  if (isNonGearSpend(a) || isNonGearSpend(b)) return moves
 
   const aGroup = a.linkGroupId ?? null
   const bGroup = b.linkGroupId ?? null
@@ -1788,7 +1864,8 @@ export function loadGearState(): GearState {
     if (!parsed?.months?.length) return defaultGearState()
     const migrated =
       migrateLegacyCash(parsed.cash) ?? structuredClone(GEAR_CASH_SEED)
-    const grouped = migrateLegacyLinksToGroups(migrated)
+    const normalized = normalizeNonGearCashMoves(migrated)
+    const grouped = migrateLegacyLinksToGroups(normalized)
     const reconciled = reconcileSeedCashDates(grouped)
     const cash = autoLinkCashMoves(reconciled)
     const keepList = migrateKeepList(parsed.keepList)
@@ -1825,6 +1902,7 @@ export function loadGearState(): GearState {
     }
     if (
       linksChanged(migrated, cash) ||
+      linksChanged(normalized, cash) ||
       linksChanged(grouped, cash) ||
       linksChanged(reconciled, cash) ||
       !hadKeepList ||
@@ -1834,7 +1912,11 @@ export function loadGearState(): GearState {
       monthsChanged
     ) {
       saveGearState(state)
-    } else if (reconciled !== grouped || grouped !== migrated) {
+    } else if (
+      reconciled !== grouped ||
+      grouped !== normalized ||
+      normalized !== migrated
+    ) {
       saveGearState(state)
     }
     return state

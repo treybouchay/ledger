@@ -16,6 +16,8 @@ import {
   effectiveListingStatus,
   gearSalesInsights,
   insertCashMoveSorted,
+  isGearInventoryBuy,
+  isNonGearSpend,
   keptBuyIds,
   linkCashMoves,
   normalizeCashItem,
@@ -95,7 +97,11 @@ function cashMoveMatchesSearch(move: GearCashMove, q: string): boolean {
     move.date?.slice(0, 10) ?? '',
     String(move.amount),
     formatMoney(move.amount),
-    move.direction === 'in' ? 'sell in' : 'buy out',
+    move.direction === 'in'
+      ? 'sell in'
+      : isNonGearSpend(move)
+        ? 'non-gear other spend out'
+        : 'buy out',
     move.soldVia ?? '',
     move.listingStatus === 'listed' ? 'listed' : '',
     move.listingStatus === 'not_listed' ? 'not listed' : '',
@@ -717,7 +723,8 @@ function buyCashTag(
   move: GearCashMove,
   moves: GearCashMove[],
   keptIds: ReadonlySet<string>,
-): BuyCashTag {
+): BuyCashTag | 'non_gear' {
+  if (isNonGearSpend(move)) return 'non_gear'
   if (keptIds.has(move.id)) return 'kept'
   if (cashGroupOpposites(moves, move).length > 0) return 'sold'
   return effectiveListingStatus(move)
@@ -1896,10 +1903,11 @@ function CashLedger({
   itemTagFilter: ItemTagFilter
   onItemTagFilterChange: (next: ItemTagFilter) => void
 }) {
-  const [mode, setMode] = useState<'in' | 'out'>('out')
+  const [mode, setMode] = useState<'in' | 'out' | 'other'>('out')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [tags, setTags] = useState<GearItemTags>(() => emptyGearTags())
   const [amount, setAmount] = useState('')
+  const [otherItem, setOtherItem] = useState('')
   const [soldVia, setSoldVia] = useState<GearSoldVia | null>(null)
   /** When set, new sell is linked to this buy after insert. */
   const [matchBuyId, setMatchBuyId] = useState<string | null>(null)
@@ -1932,6 +1940,7 @@ function CashLedger({
   const [editDate, setEditDate] = useState('')
   const [editTags, setEditTags] = useState<GearItemTags>(() => emptyGearTags())
   const [editAmount, setEditAmount] = useState('')
+  const [editItem, setEditItem] = useState('')
   const [editSoldVia, setEditSoldVia] = useState<GearSoldVia | null>(null)
   const [editNotes, setEditNotes] = useState('')
   const [notesId, setNotesId] = useState<string | null>(null)
@@ -1950,6 +1959,14 @@ function CashLedger({
   const buys = useMemo(
     () => sortCashMoves(moves.filter((m) => m.direction === 'out')),
     [moves],
+  )
+  const gearBuys = useMemo(
+    () => buys.filter((m) => isGearInventoryBuy(m)),
+    [buys],
+  )
+  const nonGearSpends = useMemo(
+    () => buys.filter((m) => isNonGearSpend(m)),
+    [buys],
   )
   const sells = useMemo(
     () => sortCashMoves(moves.filter((m) => m.direction === 'in')),
@@ -2003,12 +2020,14 @@ function CashLedger({
     setSellDetailsOpen(false)
   }
 
-  function resetComposeForMode(next: 'in' | 'out') {
+  function resetComposeForMode(next: 'in' | 'out' | 'other') {
     setMode(next)
     setMatchKey('')
     setMatchBuyId(null)
     setSellDetailsOpen(false)
-    if (next === 'out') setSoldVia(null)
+    setOtherItem('')
+    if (next !== 'in') setSoldVia(null)
+    if (next === 'other') setTags(emptyGearTags())
   }
 
   const buySearchQuery = searchSplit
@@ -2164,7 +2183,8 @@ function CashLedger({
   )
   const balance = cashBalance(openingBalance, moves)
   const moneyIn = sumNullable(sells.map((m) => m.amount))
-  const moneyOut = sumNullable(buys.map((m) => m.amount))
+  const moneyGearOut = sumNullable(gearBuys.map((m) => m.amount))
+  const moneyNonGearOut = sumNullable(nonGearSpends.map((m) => m.amount))
   const inventorySummary = useMemo(
     () => openInventoryProjectedSummary(moves, keepList, projectedTargets),
     [moves, keepList, projectedTargets],
@@ -2248,6 +2268,7 @@ function CashLedger({
   }
 
   function startLink(move: GearCashMove) {
+    if (isNonGearSpend(move)) return
     setEditingId(null)
     setNotesId(null)
     setSummaryId(null)
@@ -2260,6 +2281,7 @@ function CashLedger({
     setSummaryId(null)
     setEditingId(move.id)
     setEditDate(move.date?.slice(0, 10) || '')
+    setEditItem((move.item ?? '').trim())
     setEditTags(
       move.tags
         ? { ...move.tags }
@@ -2301,8 +2323,33 @@ function CashLedger({
   function saveEdit(move: GearCashMove) {
     const n = Number(editAmount)
     if (!Number.isFinite(n) || n <= 0) return
-    if (!tagsReady(editTags)) return
     const nextDate = editDate || null
+    const notes = editNotes.trim() || null
+    if (isNonGearSpend(move)) {
+      const label = editItem.trim()
+      if (!label) return
+      const patched = moves.map((m) =>
+        m.id === move.id
+          ? {
+              ...m,
+              date: nextDate,
+              item: label,
+              tags: null,
+              amount: n,
+              soldVia: null,
+              listingStatus: null,
+              linkGroupId: null,
+              linkedMoveId: null,
+              linkLocked: true,
+              notes,
+            }
+          : m,
+      )
+      onChangeMoves(sortCashMoves(patched))
+      setEditingId(null)
+      return
+    }
+    if (!tagsReady(editTags)) return
     const nextItem = formatGearItemLabel(editTags) || null
     const patched = moves.map((m) =>
       m.id === move.id
@@ -2313,7 +2360,7 @@ function CashLedger({
             tags: { ...editTags },
             amount: n,
             soldVia: m.direction === 'in' ? editSoldVia : null,
-            notes: editNotes.trim() || null,
+            notes,
             // Allow same-name rematch after edits.
             linkLocked: false,
           }
@@ -2370,7 +2417,7 @@ function CashLedger({
   }
 
   function toggleListingStatus(move: GearCashMove) {
-    if (move.direction !== 'out') return
+    if (!isGearInventoryBuy(move)) return
     if (excludedBuys.has(move.id)) return
     const next: GearListingStatus =
       effectiveListingStatus(move) === 'listed' ? 'not_listed' : 'listed'
@@ -2453,6 +2500,31 @@ function CashLedger({
     e.preventDefault()
     const n = Number(amount)
     if (!Number.isFinite(n) || n <= 0) return
+    if (mode === 'other') {
+      const label = otherItem.trim()
+      if (!label) return
+      const move: GearCashMove = {
+        id: `cash-${Date.now()}`,
+        date: date || null,
+        type: 'OTHER',
+        item: label,
+        tags: null,
+        amount: n,
+        direction: 'out',
+        soldVia: null,
+        linkGroupId: null,
+        linkedMoveId: null,
+        linkLocked: true,
+        listingStatus: null,
+        notes: composeNotes.trim() || null,
+        createdAt: new Date().toISOString(),
+      }
+      onChangeMoves(insertCashMoveSorted(moves, move))
+      setOtherItem('')
+      setAmount('')
+      setComposeNotes('')
+      return
+    }
     if (!tagsReady(tags)) return
     const label = formatGearItemLabel(tags)
     const move: GearCashMove = {
@@ -2541,7 +2613,7 @@ function CashLedger({
     const isLinking = linkingFrom?.id === move.id
     const isNotesOpen = notesId === move.id
     const hasNote = Boolean(move.notes?.trim())
-    const isBuy = move.direction === 'out'
+    const isBuy = isGearInventoryBuy(move)
     const alreadyKept = isBuy && excludedBuys.has(move.id)
     return (
       <div
@@ -2602,20 +2674,22 @@ function CashLedger({
             <IconUnlink />
           </button>
         ) : null}
-        <button
-          type="button"
-          className={`icon-btn${isLinking ? ' active-toggle' : ''}`}
-          aria-pressed={isLinking}
-          title={
-            isLinking ? 'Done linking' : paired ? 'Add to link group' : 'Link'
-          }
-          aria-label={
-            isLinking ? 'Done linking' : paired ? 'Add to link group' : 'Link'
-          }
-          onClick={() => (isLinking ? cancelLink() : startLink(move))}
-        >
-          {isLinking ? <IconCheck /> : <IconLink />}
-        </button>
+        {!isNonGearSpend(move) ? (
+          <button
+            type="button"
+            className={`icon-btn${isLinking ? ' active-toggle' : ''}`}
+            aria-pressed={isLinking}
+            title={
+              isLinking ? 'Done linking' : paired ? 'Add to link group' : 'Link'
+            }
+            aria-label={
+              isLinking ? 'Done linking' : paired ? 'Add to link group' : 'Link'
+            }
+            onClick={() => (isLinking ? cancelLink() : startLink(move))}
+          >
+            {isLinking ? <IconCheck /> : <IconLink />}
+          </button>
+        ) : null}
         <button
           type="button"
           className="icon-btn danger"
@@ -2631,6 +2705,7 @@ function CashLedger({
 
   function renderEditSection(move: GearCashMove) {
     if (editingId !== move.id) return null
+    const nonGear = isNonGearSpend(move)
     return (
       <form
         className="cash-move-edit"
@@ -2665,6 +2740,18 @@ function CashLedger({
               />
             </div>
           </label>
+          {nonGear ? (
+            <label className="span-2">
+              Description
+              <input
+                type="text"
+                value={editItem}
+                onChange={(e) => setEditItem(e.target.value)}
+                placeholder="What the cash went to"
+                required
+              />
+            </label>
+          ) : null}
           <label className="span-2">
             Notes
             <textarea
@@ -2676,8 +2763,10 @@ function CashLedger({
             />
           </label>
         </div>
-        <GearItemTagsFields value={editTags} onChange={setEditTags} />
-        {move.direction === 'in' ? (
+        {!nonGear ? (
+          <GearItemTagsFields value={editTags} onChange={setEditTags} />
+        ) : null}
+        {!nonGear && move.direction === 'in' ? (
           <>
             <InventoryMatchPicker
               suggestions={sellItemSuggestions}
@@ -2705,7 +2794,9 @@ function CashLedger({
             className="icon-btn primary"
             title="Save"
             aria-label="Save"
-            disabled={!tagsReady(editTags)}
+            disabled={
+              nonGear ? !editItem.trim() : !tagsReady(editTags)
+            }
           >
             <IconCheck />
           </button>
@@ -2761,7 +2852,8 @@ function CashLedger({
 
   function renderListCard(move: GearCashMove) {
     const isSell = move.direction === 'in'
-    const isBuy = !isSell
+    const nonGear = isNonGearSpend(move)
+    const isBuy = isGearInventoryBuy(move)
     const alreadyKept = isBuy && excludedBuys.has(move.id)
     const hasLinkedSell = isBuy && !alreadyKept && isLinked(move)
     const listing =
@@ -2774,16 +2866,27 @@ function CashLedger({
         id={`cash-move-${move.id}`}
         className={rowClass(
           move,
-          `cash-move ${isSell ? 'sell-row' : 'buy-row'}`,
+          `cash-move ${isSell ? 'sell-row' : nonGear ? 'other-row' : 'buy-row'}`,
         )}
         title={pairSummaryLabel(move)}
         onClick={() => activateRow(move)}
       >
         <CashMoveRail tone={isSell ? 'in' : 'out'} />
         <div className="cash-move-main">
-          <CashMoveDesc item={move.item} date={move.date} tags={move.tags} />
+          <CashMoveDesc
+            item={move.item}
+            date={move.date}
+            tags={nonGear ? null : move.tags}
+          />
           <div className="cash-move-meta">
-            {isSell ? (
+            {nonGear ? (
+              <span
+                className="status-tag status-tag-non-gear"
+                title="Cash spent outside gear inventory"
+              >
+                Non-gear
+              </span>
+            ) : isSell ? (
               <SoldViaPicker
                 value={move.soldVia}
                 onChange={(next) => patchMove(move.id, { soldVia: next })}
@@ -2817,7 +2920,7 @@ function CashLedger({
                 {listing === 'listed' ? 'Listed' : 'Not listed'}
               </button>
             ) : null}
-            {renderPairLink(move)}
+            {!nonGear ? renderPairLink(move) : null}
           </div>
         </div>
         <div className="cash-move-side">
@@ -2827,7 +2930,7 @@ function CashLedger({
           </div>
           {renderMoveActions(move)}
         </div>
-        {renderPairSummary(move)}
+        {!nonGear ? renderPairSummary(move) : null}
         {renderEditSection(move)}
         {renderNotesSection(move)}
       </li>
@@ -2995,7 +3098,10 @@ function CashLedger({
                 </span>
                 <span className="stat-sub">
                   Opening {formatMoney(openingBalance)} + sold{' '}
-                  {formatMoney(moneyIn)} − bought {formatMoney(moneyOut)}
+                  {formatMoney(moneyIn)} − bought {formatMoney(moneyGearOut)}
+                  {moneyNonGearOut > 0
+                    ? ` − non-gear ${formatMoney(moneyNonGearOut)}`
+                    : ''}
                 </span>
               </span>
               <span
@@ -3041,6 +3147,7 @@ function CashLedger({
             </li>
             {timeline.map(({ move, delta, balance: after }) => {
               const isSell = move.direction === 'in'
+              const nonGear = isNonGearSpend(move)
               return (
                 <li key={move.id} className="cash-math-row">
                   <div className="cash-math-main">
@@ -3048,10 +3155,14 @@ function CashLedger({
                       {cashMoveDescLabel(move.item, move.date)}
                     </span>
                     <span className="cash-math-meta">
-                      <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
-                        {isSell ? 'Sell' : 'Buy'}
+                      <span
+                        className={`cash-type ${
+                          isSell ? 'in' : nonGear ? 'other' : 'out'
+                        }`}
+                      >
+                        {isSell ? 'Sell' : nonGear ? 'Non-gear' : 'Buy'}
                       </span>
-                      <GearTagPills tags={move.tags} />
+                      {!nonGear ? <GearTagPills tags={move.tags} /> : null}
                     </span>
                   </div>
                   <div className="cash-math-figures">
@@ -3226,7 +3337,7 @@ function CashLedger({
         <div className="panel-header">
           <div>
             <h2>Add a cash move</h2>
-            <p>Buys and sells stay on separate rows</p>
+            <p>Buys, sells, and non-gear spends stay on separate rows</p>
           </div>
           <div className="lot-toggles">
             <button
@@ -3260,8 +3371,16 @@ function CashLedger({
               className={`cash-mode out${mode === 'out' ? ' active' : ''}`}
               onClick={() => resetComposeForMode('out')}
             >
-              Buy / spend
-              <span>Money out</span>
+              Buy gear
+              <span>Inventory out</span>
+            </button>
+            <button
+              type="button"
+              className={`cash-mode other${mode === 'other' ? ' active' : ''}`}
+              onClick={() => resetComposeForMode('other')}
+            >
+              Non-gear spend
+              <span>Cash float out</span>
             </button>
             <button
               type="button"
@@ -3285,7 +3404,9 @@ function CashLedger({
             <label>
               Amount
               <div className="cash-amount-wrap">
-                <span className={mode}>{mode === 'in' ? '+' : '−'}</span>
+                <span className={mode === 'in' ? 'in' : 'out'}>
+                  {mode === 'in' ? '+' : '−'}
+                </span>
                 <input
                   type="number"
                   min="0.01"
@@ -3298,6 +3419,21 @@ function CashLedger({
               </div>
             </label>
           </div>
+
+          {mode === 'other' ? (
+            <div className="gear-tag-step cash-compose-step">
+              <label className="cash-via-field">
+                Description
+                <input
+                  type="text"
+                  value={otherItem}
+                  onChange={(e) => setOtherItem(e.target.value)}
+                  placeholder="e.g. Gas, lunch, tools"
+                  required
+                />
+              </label>
+            </div>
+          ) : null}
 
           {mode === 'in' ? (
             <div className="gear-tag-step cash-compose-step">
@@ -3316,9 +3452,8 @@ function CashLedger({
           ) : null}
 
           {mode === 'out' ||
-          matchKey ||
-          sellDetailsOpen ||
-          Boolean(tags.kind) ? (
+          (mode === 'in' &&
+            (matchKey || sellDetailsOpen || Boolean(tags.kind))) ? (
             <div className="gear-tag-step cash-compose-step">
               {mode === 'in' && matchKey && !sellDetailsOpen ? (
                 <button
@@ -3373,14 +3508,22 @@ function CashLedger({
             <p className="hint">
               {mode === 'in'
                 ? 'Match inventory or enter tags · creates a sell row'
-                : 'Fill brand → model → type step-by-step · creates a buy row'}
+                : mode === 'other'
+                  ? 'Describe the spend · reduces cash on hand, not inventory'
+                  : 'Fill brand → model → type step-by-step · creates a buy row'}
             </p>
             <button
               type="submit"
               className="primary"
-              disabled={!tagsReady(tags)}
+              disabled={
+                mode === 'other' ? !otherItem.trim() : !tagsReady(tags)
+              }
             >
-              {mode === 'in' ? 'Add sell' : 'Add buy'}
+              {mode === 'in'
+                ? 'Add sell'
+                : mode === 'other'
+                  ? 'Add non-gear spend'
+                  : 'Add buy'}
             </button>
           </div>
         </form>
@@ -3499,6 +3642,9 @@ function CashLedger({
                       {filteredBuys.length}
                       {buyFiltersActive ? ` of ${buys.length}` : ''} rows ·{' '}
                       {formatMoney(filteredMoneyOut)} out
+                      {nonGearSpends.length > 0
+                        ? ` · ${nonGearSpends.length} non-gear`
+                        : ''}
                     </p>
                   </div>
                   <div className="cash-buys-header-controls">
@@ -4318,8 +4464,8 @@ function CashHistory({
           <div>
             <h2>Cash receipt</h2>
             <p>
-              Cash out from buys and cash in from sells, by date — with running
-              balance
+              Cash out from gear buys and non-gear spends, cash in from sells —
+              by date, with running balance
             </p>
           </div>
           <div className="cash-receipt-header-actions">
@@ -4391,21 +4537,32 @@ function CashHistory({
             ) : null}
             {historyRows.map(({ move, run }) => {
               const isSell = move.direction === 'in'
+              const nonGear = isNonGearSpend(move)
               return (
                 <li
                   key={move.id}
-                  className={`cash-move ${isSell ? 'sell-row' : 'buy-row'}`}
+                  className={`cash-move ${
+                    isSell ? 'sell-row' : nonGear ? 'other-row' : 'buy-row'
+                  }`}
                 >
                   <CashMoveRail tone={isSell ? 'in' : 'out'} />
                   <div className="cash-move-main">
                     <CashMoveDesc
                       item={move.item}
                       date={move.date}
-                      tags={move.tags}
+                      tags={nonGear ? null : move.tags}
                     />
                     <div className="cash-move-meta">
-                      <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
-                        {isSell ? 'Sell · in' : 'Buy · out'}
+                      <span
+                        className={`cash-type ${
+                          isSell ? 'in' : nonGear ? 'other' : 'out'
+                        }`}
+                      >
+                        {isSell
+                          ? 'Sell · in'
+                          : nonGear
+                            ? 'Non-gear · out'
+                            : 'Buy · out'}
                       </span>
                       {isSell && move.soldVia ? (
                         <span className={`sold-via-pill ${move.soldVia}`}>
@@ -4430,7 +4587,9 @@ function CashHistory({
                         type="button"
                         className="icon-btn"
                         title="Undo transaction"
-                        aria-label={`Undo ${isSell ? 'sell' : 'buy'}`}
+                        aria-label={`Undo ${
+                          isSell ? 'sell' : nonGear ? 'non-gear spend' : 'buy'
+                        }`}
                         onClick={() => undoMove(move)}
                       >
                         <IconUndo />
@@ -4455,21 +4614,32 @@ function CashHistory({
           <ul className="cash-timeline cash-history-list">
             {undone.map((move) => {
               const isSell = move.direction === 'in'
+              const nonGear = isNonGearSpend(move)
               return (
                 <li
                   key={`undone-${move.id}`}
-                  className={`cash-move ${isSell ? 'sell-row' : 'buy-row'} cash-history-undone`}
+                  className={`cash-move ${
+                    isSell ? 'sell-row' : nonGear ? 'other-row' : 'buy-row'
+                  } cash-history-undone`}
                 >
                   <CashMoveRail tone={isSell ? 'in' : 'out'} />
                   <div className="cash-move-main">
                     <CashMoveDesc
                       item={move.item}
                       date={move.date}
-                      tags={move.tags}
+                      tags={nonGear ? null : move.tags}
                     />
                     <div className="cash-move-meta">
-                      <span className={`cash-type ${isSell ? 'in' : 'out'}`}>
-                        {isSell ? 'Sell · in' : 'Buy · out'}
+                      <span
+                        className={`cash-type ${
+                          isSell ? 'in' : nonGear ? 'other' : 'out'
+                        }`}
+                      >
+                        {isSell
+                          ? 'Sell · in'
+                          : nonGear
+                            ? 'Non-gear · out'
+                            : 'Buy · out'}
                       </span>
                     </div>
                   </div>
@@ -4532,7 +4702,7 @@ export function GearFlipsPanel({
   const projectedAttachedBuys = state.projectedAttachedBuys ?? {}
 
   function keepBuy(move: GearCashMove) {
-    if (move.direction !== 'out') return
+    if (!isGearInventoryBuy(move)) return
     if (keepList.some((k) => k.cashMoveId === move.id)) return
     const entry: GearKeepItem = {
       id: `keep-${Date.now().toString(36)}`,
