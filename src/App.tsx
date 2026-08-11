@@ -776,6 +776,11 @@ export default function App() {
   const flipProfitPositive = Math.max(0, monthFlipProfit.profit)
   const showFlipProfit =
     monthFlipProfit.groupCount > 0 || monthFlipProfit.sellCount > 0
+  // Hypothetical: total cash made (gross sold) infused into variable budget this month.
+  const variableBudgetIfCashMade =
+    Math.round((insightVariableBudget + monthFlipProfit.sold) * 100) / 100
+  const leftOfVariableIfCashMade =
+    Math.round((variableBudgetIfCashMade - insightVariableSpent) * 100) / 100
   // Bar = uses of salary (fixed / variable / leftover) plus a distinct gear-flip
   // infusion segment. Leftover card stays income − fixed − variable (no flips).
   // Base expands by positive flip profit so segments still sum to ~100%:
@@ -2218,6 +2223,20 @@ export default function App() {
                   ? `Trevor ${formatMoney(trevor.variableBudget)} · Kate ${formatMoney(kate.variableBudget)}`
                   : 'Planned variable caps this month'}
               </p>
+              {showFlipProfit && monthFlipProfit.sold > 0 ? (
+                <p className="stat-sub what-if-cash-made">
+                  If + total cash made →{' '}
+                  {formatMoney(variableBudgetIfCashMade)}
+                  {' · '}
+                  <span
+                    className={
+                      leftOfVariableIfCashMade >= 0 ? 'good' : 'bad'
+                    }
+                  >
+                    {formatMoney(leftOfVariableIfCashMade)} left
+                  </span>
+                </p>
+              ) : null}
             </div>
             <div>
               <span className="stat-label">Left of variable</span>

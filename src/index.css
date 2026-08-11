@@ -860,6 +860,16 @@ select {
   color: var(--ink);
 }
 
+.overview-quiet-strip .what-if-cash-made .good {
+  color: var(--good);
+  font-weight: 600;
+}
+
+.overview-quiet-strip .what-if-cash-made .bad {
+  color: var(--bad);
+  font-weight: 600;
+}
+
 .spend-meter {
   margin-top: 0.65rem;
 }
