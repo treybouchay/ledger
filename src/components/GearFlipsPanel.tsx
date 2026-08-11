@@ -3113,23 +3113,30 @@ function CashLedger({
 
       <div className="cash-hero cash-profit-card">
         <div className="cash-hero-grid cash-profit-header">
-          <div>
-            <span className="stat-label">Profit</span>
-            <div
-              className={`stat-value${
-                monthFlipProfit.profit > 0
-                  ? ' good'
-                  : monthFlipProfit.profit < 0
-                    ? ' bad'
-                    : ''
-              }`}
-            >
-              {monthFlipProfit.profit > 0 ? '+' : ''}
-              {formatMoney(monthFlipProfit.profit)}
+          <div className="cash-profit-metrics">
+            <div>
+              <span className="stat-label">Profit</span>
+              <div
+                className={`stat-value${
+                  monthFlipProfit.profit > 0
+                    ? ' good'
+                    : monthFlipProfit.profit < 0
+                      ? ' bad'
+                      : ''
+                }`}
+              >
+                {monthFlipProfit.profit > 0 ? '+' : ''}
+                {formatMoney(monthFlipProfit.profit)}
+              </div>
             </div>
-            <p className="stat-sub">
-              Sold {formatMoney(monthFlipProfit.sold)} · Cost{' '}
-              {formatMoney(monthFlipProfit.purchased)}
+            <div>
+              <span className="stat-label">Total cash made</span>
+              <div className="stat-value">
+                {formatMoney(monthFlipProfit.sold)}
+              </div>
+            </div>
+            <p className="stat-sub cash-profit-metrics-sub">
+              Cost {formatMoney(monthFlipProfit.purchased)}
               {monthFlipProfit.sellCount > 0
                 ? ` · ${monthFlipProfit.sellCount} sell${
                     monthFlipProfit.sellCount === 1 ? '' : 's'

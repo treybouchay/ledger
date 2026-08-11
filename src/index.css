@@ -817,6 +817,31 @@ select {
   color: var(--bad);
 }
 
+.quiet-strip-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem 0.75rem;
+  margin-top: 0.15rem;
+}
+
+.quiet-strip-pair .stat-micro-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+}
+
+.quiet-strip-pair strong {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.budget-alloc-legend .legend-cash-made {
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
 .quiet-strip-link {
   display: inline;
   padding: 0;
@@ -3159,6 +3184,18 @@ select {
 
 .cash-profit-header {
   align-items: flex-start;
+}
+
+.cash-profit-metrics {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.35rem 1.5rem;
+  align-items: start;
+}
+
+.cash-profit-metrics-sub {
+  grid-column: 1 / -1;
+  margin: 0.15rem 0 0;
 }
 
 .cash-profit-month-nav {

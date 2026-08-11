@@ -2057,7 +2057,7 @@ export default function App() {
                 role="img"
                 aria-label={`Fixed bills assumed paid ${formatMoney(assumedFixedBills)}, variable spent ${formatMoney(actualVariableSpent)}${
                   flipProfitPositive > 0
-                    ? `, gear flip profit ${formatMoney(flipProfitPositive)}`
+                    ? `, gear flip profit ${formatMoney(flipProfitPositive)}, total cash made ${formatMoney(monthFlipProfit.sold)}`
                     : ''
                 }, leftover ${formatMoney(actualLeftover)}`}
               >
@@ -2093,7 +2093,7 @@ export default function App() {
                   <span
                     className="seg flip"
                     style={{ width: `${actualFlipPct}%` }}
-                    title="Cash infusion · gear flip profit (linked sells)"
+                    title="Cash infusion · gear flip profit & total cash made (linked sells)"
                   />
                 ) : null}
               </div>
@@ -2135,7 +2135,12 @@ export default function App() {
                     Gear flips{' '}
                     <strong className="good">
                       {formatMoney(flipProfitPositive)}
-                    </strong>
+                    </strong>{' '}
+                    profit
+                    <span className="legend-cash-made">
+                      {' '}
+                      · {formatMoney(monthFlipProfit.sold)} total cash made
+                    </span>
                   </li>
                 ) : null}
               </ul>
@@ -2163,21 +2168,29 @@ export default function App() {
             {showFlipProfit ? (
               <div>
                 <span className="stat-label">Cash infusion · Gear flips</span>
-                <strong
-                  className={
-                    monthFlipProfit.profit > 0
-                      ? 'good'
-                      : monthFlipProfit.profit < 0
-                        ? 'bad'
-                        : undefined
-                  }
-                >
-                  {monthFlipProfit.profit > 0 ? '+' : ''}
-                  {formatMoney(monthFlipProfit.profit)}
-                </strong>
+                <div className="quiet-strip-pair" role="group">
+                  <div>
+                    <span className="stat-micro-label">Profit</span>
+                    <strong
+                      className={
+                        monthFlipProfit.profit > 0
+                          ? 'good'
+                          : monthFlipProfit.profit < 0
+                            ? 'bad'
+                            : undefined
+                      }
+                    >
+                      {monthFlipProfit.profit > 0 ? '+' : ''}
+                      {formatMoney(monthFlipProfit.profit)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="stat-micro-label">Total cash made</span>
+                    <strong>{formatMoney(monthFlipProfit.sold)}</strong>
+                  </div>
+                </div>
                 <p className="stat-sub">
-                  Sold {formatMoney(monthFlipProfit.sold)} · Cost{' '}
-                  {formatMoney(monthFlipProfit.purchased)}
+                  Cost {formatMoney(monthFlipProfit.purchased)}
                   {monthFlipProfit.sellCount > 0
                     ? ` · ${monthFlipProfit.sellCount} sell${
                         monthFlipProfit.sellCount === 1 ? '' : 's'
