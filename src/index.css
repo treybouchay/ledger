@@ -5247,6 +5247,14 @@ select {
   white-space: nowrap;
 }
 
+.projected-footer strong.out {
+  color: var(--bad);
+}
+
+.projected-footer strong.in {
+  color: var(--good);
+}
+
 @media (max-width: 900px) {
   .projected-footer {
     grid-template-columns: minmax(0, 1fr);
