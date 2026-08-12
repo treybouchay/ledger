@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { BootLoader } from './components/BootLoader'
+import {
+  bootstrapCloudSession,
+  CloudSyncPanel,
+} from './components/CloudSyncPanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { GearFlipsPanel } from './components/GearFlipsPanel'
 import { ImportReviewQueue } from './components/ImportReviewQueue'
@@ -80,6 +84,13 @@ import {
   type PossibleDuplicatePair,
 } from './lib/duplicates'
 import { confirmRemove } from './lib/confirm'
+import {
+  ensureHousehold,
+  migrateDeviceToCloud,
+  pushCloudBackup,
+  type CloudContext,
+} from './lib/cloudSync'
+import { getSupabase, isSupabaseConfigured } from './lib/supabase'
 import type { ReviewDraftRow } from './lib/reviewDraft'
 import {
   bootstrapLedger,
@@ -230,6 +241,8 @@ export default function App() {
     statements: false,
   })
   const [gear, setGear] = useState<GearState>(() => loadGearState())
+  const [cloudContext, setCloudContext] = useState<CloudContext | null>(null)
+  const cloudPushTimerRef = useRef<number | null>(null)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const backupFileRef = useRef<HTMLInputElement>(null)
   const backupActionRef = useRef<'restore' | 'merge'>('restore')
@@ -477,6 +490,96 @@ export default function App() {
   useEffect(() => {
     saveUiMonth(monthId)
   }, [monthId])
+
+  // Supabase auth + household bootstrap
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+    void bootstrapCloudSession().then(setCloudContext)
+    const sb = getSupabase()
+    if (!sb) return
+    const {
+      data: { subscription },
+    } = sb.auth.onAuthStateChange((_event, session) => {
+      if (session?.user?.email) {
+        void ensureHousehold(session.user.id).then((householdId) => {
+          if (householdId) {
+            setCloudContext({
+              session,
+              householdId,
+              email: session.user.email!,
+            })
+          } else {
+            setCloudContext(null)
+          }
+        })
+      } else {
+        setCloudContext(null)
+      }
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // Debounced auto-save to cloud while signed in
+  useEffect(() => {
+    if (!cloudContext) return
+    if (cloudPushTimerRef.current != null) {
+      window.clearTimeout(cloudPushTimerRef.current)
+    }
+    cloudPushTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const backup = buildBackup({
+            transactions,
+            imports,
+            learnedRules,
+            gear,
+          })
+          backup.customCategories = getCustomCategories()
+          backup.customAccounts = getCustomAccounts()
+          backup.budgetOverrides = getBudgetOverrides()
+          backup.incomes = getIncomeOverrides()
+          await pushCloudBackup(cloudContext.householdId, backup)
+          await migrateDeviceToCloud(cloudContext.householdId, backup)
+        } catch (err) {
+          console.error('[cloud] auto sync failed', err)
+        }
+      })()
+    }, 3000)
+    return () => {
+      if (cloudPushTimerRef.current != null) {
+        window.clearTimeout(cloudPushTimerRef.current)
+      }
+    }
+  }, [
+    cloudContext,
+    transactions,
+    imports,
+    learnedRules,
+    gear,
+    customBudgetTick,
+    customCategories,
+    customAccounts,
+  ])
+
+  function applyCloudPull(backup: ReturnType<typeof buildBackup>) {
+    skipNextTxPersistRef.current = true
+    skipNextImportsPersistRef.current = true
+    setTransactions(backup.transactions)
+    setImports(backup.imports)
+    setLearnedRules(backup.learnedRules)
+    setCustomCategories(getCustomCategories())
+    setCustomAccounts(getCustomAccounts())
+    setCustomBudgetTick((n) => n + 1)
+    setGear(backup.gear)
+    setViewingImportId(null)
+    setMonthId(
+      pickInitialMonthId(
+        backup.transactions,
+        ACTIVE_MONTH_ID,
+        backup.imports,
+      ),
+    )
+  }
 
   // Another tab wrote ledger keys — reload so we don't overwrite newer data.
   useEffect(() => {
@@ -3390,6 +3493,25 @@ export default function App() {
             </div>
           </div>
 
+          <CloudSyncPanel
+            cloud={cloudContext}
+            onCloudChange={setCloudContext}
+            onPullApplied={applyCloudPull}
+            buildLiveBackup={() => {
+              const backup = buildBackup({
+                transactions,
+                imports,
+                learnedRules,
+                gear,
+              })
+              backup.customCategories = getCustomCategories()
+              backup.customAccounts = getCustomAccounts()
+              backup.budgetOverrides = getBudgetOverrides()
+              backup.incomes = getIncomeOverrides()
+              return backup
+            }}
+          />
+
           <section
             className={`panel settings-panel${hasDuplicatesRisk ? ' warn-panel' : ''}`}
           >
@@ -3718,6 +3840,7 @@ export default function App() {
                   importId={viewingImport.id}
                   hasStoredFile={viewingImport.hasStoredFile}
                   fileName={viewingImport.fileName}
+                  householdId={cloudContext?.householdId ?? null}
                 />
                 <div className="statement-charges">
                   {statementTransactions.length === 0 ? (

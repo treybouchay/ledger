@@ -68,6 +68,7 @@ doctl apps create --spec .do/app.yaml
 
 - Confirm the `*.ondigitalocean.app` URL loads
 - Optional: attach a custom domain under the app’s **Settings**
+- Optional: **Cloud sync** — see [SUPABASE_SETUP.md](./SUPABASE_SETUP.md) to sync between devices (static site stays; add Supabase env vars and redeploy)
 
 ## Next
 

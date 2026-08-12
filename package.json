@@ -13,6 +13,7 @@
     "test": "npx --yes tsx src/lib/parseScreenshotText.test.ts && npx --yes tsx src/lib/ocrScreenshot.test.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "pdfjs-dist": "^4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

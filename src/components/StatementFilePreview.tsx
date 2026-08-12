@@ -3,9 +3,9 @@ import {
   isImageMime,
   isPdfMime,
   isTextLikeMime,
-  loadStatementFile,
   type StoredStatementFile,
 } from '../lib/statementFiles'
+import { resolveStatementFile } from '../lib/cloudSync'
 
 type LoadState =
   | { status: 'loading' }
@@ -23,11 +23,14 @@ export function StatementFilePreview({
   importId,
   hasStoredFile,
   fileName,
+  householdId,
 }: {
   importId: string
   /** From StatementImport — false/undefined for legacy uploads. */
   hasStoredFile?: boolean
   fileName: string
+  /** When signed in, fetch from cloud if not in this browser. */
+  householdId?: string | null
 }) {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
 
@@ -42,7 +45,7 @@ export function StatementFilePreview({
       }
       setState({ status: 'loading' })
       try {
-        const file = await loadStatementFile(importId)
+        const file = await resolveStatementFile(importId, fileName, householdId ?? null)
         if (cancelled) return
         if (!file) {
           setState({ status: 'missing' })
@@ -71,7 +74,7 @@ export function StatementFilePreview({
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [importId, hasStoredFile])
+  }, [importId, hasStoredFile, fileName, householdId])
 
   return (
     <div className="statement-file-preview">

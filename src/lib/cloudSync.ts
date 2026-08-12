@@ -1,0 +1,588 @@
+import { applyBackup, buildBackup, type HouseholdBackup } from './backup'
+import {
+  getBudgetOverrides,
+  getCustomCategories,
+  getIncomeOverrides,
+  replaceBudgetOverrides,
+  replaceCustomCategories,
+  replaceIncomeOverrides,
+} from './customCategories'
+import {
+  getCustomAccounts,
+  replaceCustomAccounts,
+} from './customAccounts'
+import { loadGearState, saveGearState } from './gearStorage'
+import { loadLearnedRules, saveLearnedRules, type LearnedRule } from './learnedRules'
+import {
+  loadStatementFile,
+  saveStatementFile,
+  type StoredStatementFile,
+} from './statementFiles'
+import { loadImports, loadTransactions } from './storage'
+import {
+  getCachedHouseholdId,
+  getSupabase,
+  isSupabaseConfigured,
+  setCachedHouseholdId,
+  STATEMENT_FILES_BUCKET,
+  type AuthSession,
+} from './supabase'
+import type {
+  Account,
+  BudgetLine,
+  Category,
+  GearState,
+  PersonId,
+  StatementImport,
+  Transaction,
+} from '../types'
+
+export type CloudSyncState =
+  | 'disabled'
+  | 'signed_out'
+  | 'loading'
+  | 'ready'
+  | 'syncing'
+  | 'error'
+
+export interface CloudContext {
+  session: AuthSession
+  householdId: string
+  email: string
+}
+
+function storagePath(householdId: string, importId: string, fileName: string): string {
+  const safeName = fileName.replace(/[/\\]/g, '_')
+  return `${householdId}/${importId}/${safeName}`
+}
+
+export async function getCurrentSession(): Promise<AuthSession | null> {
+  const sb = getSupabase()
+  if (!sb) return null
+  const { data } = await sb.auth.getSession()
+  return data.session
+}
+
+export async function signInWithMagicLink(email: string): Promise<string | null> {
+  const sb = getSupabase()
+  if (!sb) return 'Supabase is not configured on this deployment.'
+  const redirectTo = window.location.origin + window.location.pathname
+  const { error } = await sb.auth.signInWithOtp({
+    email: email.trim(),
+    options: { emailRedirectTo: redirectTo },
+  })
+  return error?.message ?? null
+}
+
+export async function signOutCloud(): Promise<void> {
+  const sb = getSupabase()
+  if (sb) await sb.auth.signOut()
+  setCachedHouseholdId(null)
+}
+
+/** Create or fetch the user's household membership. */
+export async function ensureHousehold(userId: string): Promise<string | null> {
+  const sb = getSupabase()
+  if (!sb) return null
+
+  const cached = getCachedHouseholdId()
+  if (cached) {
+    const { data: member } = await sb
+      .from('household_members')
+      .select('household_id')
+      .eq('user_id', userId)
+      .eq('household_id', cached)
+      .maybeSingle()
+    if (member?.household_id) return cached
+  }
+
+  const { data: existing } = await sb
+    .from('household_members')
+    .select('household_id')
+    .eq('user_id', userId)
+    .limit(1)
+    .maybeSingle()
+
+  if (existing?.household_id) {
+    setCachedHouseholdId(existing.household_id)
+    return existing.household_id
+  }
+
+  const { data: household, error: hErr } = await sb
+    .from('households')
+    .insert({ name: 'Trevor & Kate' })
+    .select('id')
+    .single()
+
+  if (hErr || !household?.id) {
+    console.error('[cloud] create household failed', hErr)
+    return null
+  }
+
+  const { error: mErr } = await sb.from('household_members').insert({
+    household_id: household.id,
+    user_id: userId,
+  })
+
+  if (mErr) {
+    console.error('[cloud] add household member failed', mErr)
+    return null
+  }
+
+  setCachedHouseholdId(household.id)
+  return household.id
+}
+
+function rowToTransaction(row: Record<string, unknown>): Transaction {
+  return {
+    id: String(row.id),
+    personId: row.person_id as PersonId,
+    monthId: String(row.month_id),
+    date: String(row.date).slice(0, 10),
+    amount: Number(row.amount),
+    merchant: String(row.merchant),
+    accountId: String(row.account_id),
+    categoryId: String(row.category_id),
+    notes: row.notes ? String(row.notes) : undefined,
+    isRefund: Boolean(row.is_refund),
+    isCashIn: Boolean(row.is_cash_in),
+    source: row.source as Transaction['source'],
+    importId: row.import_id ? String(row.import_id) : undefined,
+    sourceFile: row.source_file ? String(row.source_file) : undefined,
+  }
+}
+
+function rowToImport(row: Record<string, unknown>): StatementImport {
+  return {
+    id: String(row.id),
+    fileName: String(row.file_name),
+    uploadedAt: String(row.uploaded_at),
+    personId: row.person_id as PersonId,
+    primaryAccountId: String(row.primary_account_id),
+    monthIds: Array.isArray(row.month_ids) ? row.month_ids.map(String) : [],
+    transactionCount: Number(row.transaction_count),
+    netAmount: Number(row.net_amount),
+    hasStoredFile: Boolean(row.has_stored_file),
+    mimeType: row.mime_type ? String(row.mime_type) : undefined,
+    sourceKind: row.source_kind as StatementImport['sourceKind'],
+  }
+}
+
+function rowToRule(row: Record<string, unknown>): LearnedRule {
+  return {
+    id: String(row.id),
+    pattern: String(row.pattern),
+    categoryId: String(row.category_id),
+    accountId: row.account_id ? String(row.account_id) : undefined,
+    createdAt: String(row.created_at),
+  }
+}
+
+export async function fetchCloudBackup(
+  householdId: string,
+): Promise<HouseholdBackup | null> {
+  const sb = getSupabase()
+  if (!sb) return null
+
+  const [
+    txRes,
+    impRes,
+    catRes,
+    accRes,
+    budRes,
+    incRes,
+    ruleRes,
+    gearRes,
+  ] = await Promise.all([
+    sb.from('transactions').select('*').eq('household_id', householdId),
+    sb.from('statement_imports').select('*').eq('household_id', householdId),
+    sb.from('custom_categories').select('*').eq('household_id', householdId),
+    sb.from('custom_accounts').select('*').eq('household_id', householdId),
+    sb.from('budget_overrides').select('*').eq('household_id', householdId),
+    sb.from('income_overrides').select('*').eq('household_id', householdId),
+    sb.from('learned_rules').select('*').eq('household_id', householdId),
+    sb.from('gear_state').select('*').eq('household_id', householdId).maybeSingle(),
+  ])
+
+  for (const res of [txRes, impRes, catRes, accRes, budRes, incRes, ruleRes]) {
+    if (res.error) throw new Error(res.error.message)
+  }
+  if (gearRes.error) throw new Error(gearRes.error.message)
+
+  const transactions = (txRes.data ?? []).map(rowToTransaction)
+  const imports = (impRes.data ?? []).map(rowToImport)
+
+  if (
+    transactions.length === 0 &&
+    imports.length === 0 &&
+    (catRes.data ?? []).length === 0 &&
+    !(gearRes.data?.cash as unknown[] | undefined)?.length
+  ) {
+    return null
+  }
+
+  const customCategories: Category[] = (catRes.data ?? []).map((row) => ({
+    id: String(row.id),
+    label: String(row.label),
+    icon: String(row.icon),
+    kind: row.kind as Category['kind'],
+    ledgerTracked: Boolean(row.ledger_tracked),
+  }))
+
+  const customAccounts: Account[] = (accRes.data ?? []).map((row) => ({
+    id: String(row.id),
+    label: String(row.label),
+    icon: String(row.icon),
+    owner: row.owner as Account['owner'],
+  }))
+
+  const budgetOverrides: BudgetLine[] = (budRes.data ?? []).map((row) => ({
+    personId: row.person_id as PersonId,
+    categoryId: String(row.category_id),
+    amount: Number(row.amount),
+  }))
+
+  const incomes: Partial<Record<PersonId, number>> = {}
+  for (const row of incRes.data ?? []) {
+    incomes[row.person_id as PersonId] = Number(row.amount)
+  }
+
+  const learnedRules = (ruleRes.data ?? []).map(rowToRule)
+
+  const gearRow = gearRes.data
+  const gear: GearState = gearRow
+    ? {
+        openingBalance: Number(gearRow.opening_balance),
+        months: (gearRow.months as GearState['months']) ?? [],
+        cash: (gearRow.cash as GearState['cash']) ?? [],
+        keepList: (gearRow.keep_list as GearState['keepList']) ?? [],
+        projectedTargets:
+          (gearRow.projected_targets as GearState['projectedTargets']) ?? {},
+        projectedManualRows:
+          (gearRow.projected_manual_rows as GearState['projectedManualRows']) ??
+          [],
+        projectedAttachedBuys:
+          (gearRow.projected_attached_buys as GearState['projectedAttachedBuys']) ??
+          {},
+      }
+    : loadGearState()
+
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    transactions,
+    imports,
+    learnedRules,
+    customCategories,
+    customAccounts,
+    budgetOverrides,
+    incomes,
+    gear,
+  }
+}
+
+function transactionRow(householdId: string, t: Transaction) {
+  return {
+    id: t.id,
+    household_id: householdId,
+    person_id: t.personId,
+    month_id: t.monthId,
+    date: t.date,
+    amount: t.amount,
+    merchant: t.merchant,
+    account_id: t.accountId,
+    category_id: t.categoryId,
+    notes: t.notes ?? null,
+    is_refund: Boolean(t.isRefund),
+    is_cash_in: Boolean(t.isCashIn),
+    source: t.source,
+    import_id: t.importId ?? null,
+    source_file: t.sourceFile ?? null,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function importRow(
+  householdId: string,
+  item: StatementImport,
+  storagePathValue: string | null,
+) {
+  return {
+    id: item.id,
+    household_id: householdId,
+    file_name: item.fileName,
+    uploaded_at: item.uploadedAt,
+    person_id: item.personId,
+    primary_account_id: item.primaryAccountId,
+    month_ids: item.monthIds,
+    transaction_count: item.transactionCount,
+    net_amount: item.netAmount,
+    has_stored_file: Boolean(item.hasStoredFile),
+    mime_type: item.mimeType ?? null,
+    source_kind: item.sourceKind ?? null,
+    storage_path: storagePathValue,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+export async function pushCloudBackup(
+  householdId: string,
+  backup: HouseholdBackup,
+): Promise<void> {
+  const sb = getSupabase()
+  if (!sb) return
+
+  const txRows = backup.transactions.map((t) => transactionRow(householdId, t))
+  const impRows = backup.imports.map((item) => {
+    const path =
+      item.hasStoredFile
+        ? storagePath(householdId, item.id, item.fileName)
+        : null
+    return importRow(householdId, item, path)
+  })
+
+  if (txRows.length > 0) {
+    const { error } = await sb.from('transactions').upsert(txRows, {
+      onConflict: 'id,household_id',
+    })
+    if (error) throw new Error(error.message)
+  }
+
+  if (impRows.length > 0) {
+    const { error } = await sb.from('statement_imports').upsert(impRows, {
+      onConflict: 'id,household_id',
+    })
+    if (error) throw new Error(error.message)
+  }
+
+  const catRows = backup.customCategories.map((c) => ({
+    id: c.id,
+    household_id: householdId,
+    label: c.label,
+    icon: c.icon,
+    kind: c.kind,
+    ledger_tracked: c.ledgerTracked,
+    updated_at: new Date().toISOString(),
+  }))
+  if (catRows.length > 0) {
+    const { error } = await sb.from('custom_categories').upsert(catRows, {
+      onConflict: 'id,household_id',
+    })
+    if (error) throw new Error(error.message)
+  }
+
+  const accRows = backup.customAccounts.map((a) => ({
+    id: a.id,
+    household_id: householdId,
+    label: a.label,
+    icon: a.icon,
+    owner: a.owner,
+    updated_at: new Date().toISOString(),
+  }))
+  if (accRows.length > 0) {
+    const { error } = await sb.from('custom_accounts').upsert(accRows, {
+      onConflict: 'id,household_id',
+    })
+    if (error) throw new Error(error.message)
+  }
+
+  const budRows = backup.budgetOverrides.map((b) => ({
+    household_id: householdId,
+    person_id: b.personId,
+    category_id: b.categoryId,
+    amount: b.amount,
+    updated_at: new Date().toISOString(),
+  }))
+  if (budRows.length > 0) {
+    const { error } = await sb.from('budget_overrides').upsert(budRows, {
+      onConflict: 'household_id,person_id,category_id',
+    })
+    if (error) throw new Error(error.message)
+  }
+
+  const incRows = (Object.entries(backup.incomes) as [PersonId, number][])
+    .filter(([, amount]) => typeof amount === 'number')
+    .map(([personId, amount]) => ({
+      household_id: householdId,
+      person_id: personId,
+      amount,
+      updated_at: new Date().toISOString(),
+    }))
+  if (incRows.length > 0) {
+    const { error } = await sb.from('income_overrides').upsert(incRows, {
+      onConflict: 'household_id,person_id',
+    })
+    if (error) throw new Error(error.message)
+  }
+
+  const ruleRows = backup.learnedRules.map((r) => ({
+    id: r.id,
+    household_id: householdId,
+    pattern: r.pattern,
+    category_id: r.categoryId,
+    account_id: r.accountId ?? null,
+    created_at: r.createdAt,
+    updated_at: new Date().toISOString(),
+  }))
+  if (ruleRows.length > 0) {
+    const { error } = await sb.from('learned_rules').upsert(ruleRows, {
+      onConflict: 'id,household_id',
+    })
+    if (error) throw new Error(error.message)
+  }
+
+  const gear = backup.gear
+  const { error: gearErr } = await sb.from('gear_state').upsert(
+    {
+      household_id: householdId,
+      opening_balance: gear.openingBalance,
+      months: gear.months,
+      cash: gear.cash,
+      keep_list: gear.keepList,
+      projected_targets: gear.projectedTargets ?? {},
+      projected_manual_rows: gear.projectedManualRows ?? [],
+      projected_attached_buys: gear.projectedAttachedBuys ?? {},
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'household_id' },
+  )
+  if (gearErr) throw new Error(gearErr.message)
+}
+
+export async function uploadStatementFilesFromDevice(
+  householdId: string,
+  imports: StatementImport[],
+): Promise<number> {
+  const sb = getSupabase()
+  if (!sb) return 0
+
+  let uploaded = 0
+  for (const item of imports) {
+    if (!item.hasStoredFile) continue
+    try {
+      const local = await loadStatementFile(item.id)
+      if (!local) continue
+      const path = storagePath(householdId, item.id, item.fileName)
+      const { error } = await sb.storage
+        .from(STATEMENT_FILES_BUCKET)
+        .upload(path, local.blob, {
+          upsert: true,
+          contentType: local.mimeType,
+        })
+      if (error) {
+        console.error('[cloud] upload statement file failed', item.id, error)
+        continue
+      }
+      uploaded += 1
+    } catch (err) {
+      console.error('[cloud] upload statement file error', item.id, err)
+    }
+  }
+  return uploaded
+}
+
+export async function downloadStatementFileFromCloud(
+  householdId: string,
+  importId: string,
+  fileName: string,
+): Promise<StoredStatementFile | null> {
+  const sb = getSupabase()
+  if (!sb) return null
+
+  const path = storagePath(householdId, importId, fileName)
+  const { data, error } = await sb.storage
+    .from(STATEMENT_FILES_BUCKET)
+    .download(path)
+
+  if (error || !data) {
+    console.warn('[cloud] download statement file failed', importId, error)
+    return null
+  }
+
+  const mimeType = data.type || 'application/octet-stream'
+  const record: StoredStatementFile = {
+    importId,
+    fileName,
+    mimeType,
+    byteLength: data.size,
+    blob: data,
+    storedAt: new Date().toISOString(),
+  }
+
+  try {
+    await saveStatementFile(importId, data, fileName)
+  } catch {
+    /* cache optional */
+  }
+
+  return record
+}
+
+/** Load from IndexedDB, then Supabase Storage if logged in. */
+export async function resolveStatementFile(
+  importId: string,
+  fileName: string,
+  householdId: string | null,
+): Promise<StoredStatementFile | null> {
+  const local = await loadStatementFile(importId)
+  if (local) return local
+  if (!householdId || !isSupabaseConfigured()) return null
+  return downloadStatementFileFromCloud(householdId, importId, fileName)
+}
+
+export function localDeviceHasData(): boolean {
+  const tx = loadTransactions().transactions
+  const imp = loadImports().imports
+  return tx.length > 0 || imp.length > 0 || loadGearState().cash.length > 0
+}
+
+export function applyCloudBackupToLocal(backup: HouseholdBackup): void {
+  applyBackup(backup)
+}
+
+export function buildBackupFromModules(input?: Parameters<typeof buildBackup>[0]): HouseholdBackup {
+  return buildBackup(input)
+}
+
+/** Upload everything on this device to the cloud (first-time migration). */
+export async function migrateDeviceToCloud(
+  householdId: string,
+  backup?: HouseholdBackup,
+): Promise<{ filesUploaded: number }> {
+  const payload =
+    backup ??
+    buildBackup({
+      transactions: loadTransactions().transactions,
+      imports: loadImports().imports,
+      learnedRules: loadLearnedRules(),
+      gear: loadGearState(),
+    })
+  payload.customCategories = getCustomCategories()
+  payload.customAccounts = getCustomAccounts()
+  payload.budgetOverrides = getBudgetOverrides()
+  payload.incomes = getIncomeOverrides()
+
+  await pushCloudBackup(householdId, payload)
+  const filesUploaded = await uploadStatementFilesFromDevice(
+    householdId,
+    payload.imports,
+  )
+  return { filesUploaded }
+}
+
+/** Pull cloud data into this browser (overwrites local ledger stores). */
+export async function pullCloudToDevice(householdId: string): Promise<HouseholdBackup | null> {
+  const backup = await fetchCloudBackup(householdId)
+  if (!backup) return null
+  applyCloudBackupToLocal(backup)
+  return backup
+}
+
+export function persistModulesFromBackup(backup: HouseholdBackup): void {
+  replaceCustomCategories(backup.customCategories)
+  replaceCustomAccounts(backup.customAccounts)
+  replaceBudgetOverrides(backup.budgetOverrides)
+  replaceIncomeOverrides(backup.incomes)
+  saveLearnedRules(backup.learnedRules)
+  saveGearState(backup.gear)
+}
