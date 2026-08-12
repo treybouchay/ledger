@@ -81,9 +81,11 @@ export async function signOutCloud(): Promise<void> {
 }
 
 /** Create or fetch the user's household membership. */
-export async function ensureHousehold(userId: string): Promise<string | null> {
+export async function ensureHousehold(
+  userId: string,
+): Promise<{ householdId: string | null; error?: string }> {
   const sb = getSupabase()
-  if (!sb) return null
+  if (!sb) return { householdId: null, error: 'Supabase not configured' }
 
   const cached = getCachedHouseholdId()
   if (cached) {
@@ -93,21 +95,40 @@ export async function ensureHousehold(userId: string): Promise<string | null> {
       .eq('user_id', userId)
       .eq('household_id', cached)
       .maybeSingle()
-    if (member?.household_id) return cached
+    if (member?.household_id) return { householdId: cached }
   }
 
-  const { data: existing } = await sb
+  const { data: existing, error: existingErr } = await sb
     .from('household_members')
     .select('household_id')
     .eq('user_id', userId)
     .limit(1)
     .maybeSingle()
 
-  if (existing?.household_id) {
-    setCachedHouseholdId(existing.household_id)
-    return existing.household_id
+  if (existingErr) {
+    console.error('[cloud] list household membership failed', existingErr)
   }
 
+  if (existing?.household_id) {
+    setCachedHouseholdId(existing.household_id)
+    return { householdId: existing.household_id }
+  }
+
+  // Prefer RPC so insert…select isn’t blocked by RLS before membership exists.
+  const { data: rpcId, error: rpcErr } = await sb.rpc('create_household', {
+    p_name: 'Trevor & Kate',
+  })
+
+  if (!rpcErr && typeof rpcId === 'string' && rpcId.length > 0) {
+    setCachedHouseholdId(rpcId)
+    return { householdId: rpcId }
+  }
+
+  if (rpcErr) {
+    console.error('[cloud] create_household rpc failed', rpcErr)
+  }
+
+  // Fallback for projects that haven’t run the RPC migration yet.
   const { data: household, error: hErr } = await sb
     .from('households')
     .insert({ name: 'Trevor & Kate' })
@@ -115,8 +136,12 @@ export async function ensureHousehold(userId: string): Promise<string | null> {
     .single()
 
   if (hErr || !household?.id) {
+    const msg =
+      hErr?.message ??
+      rpcErr?.message ??
+      'Could not create household (run create_household SQL in Supabase).'
     console.error('[cloud] create household failed', hErr)
-    return null
+    return { householdId: null, error: msg }
   }
 
   const { error: mErr } = await sb.from('household_members').insert({
@@ -126,11 +151,11 @@ export async function ensureHousehold(userId: string): Promise<string | null> {
 
   if (mErr) {
     console.error('[cloud] add household member failed', mErr)
-    return null
+    return { householdId: null, error: mErr.message }
   }
 
   setCachedHouseholdId(household.id)
-  return household.id
+  return { householdId: household.id }
 }
 
 function rowToTransaction(row: Record<string, unknown>): Transaction {

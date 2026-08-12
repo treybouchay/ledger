@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import {
   ensureHousehold,
   fetchCloudBackup,
@@ -11,7 +11,7 @@ import {
   signOutCloud,
   type CloudContext,
 } from '../lib/cloudSync'
-import { isSupabaseConfigured } from '../lib/supabase'
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase'
 import type { HouseholdBackup } from '../lib/backup'
 
 export function CloudSyncPanel({
@@ -29,6 +29,23 @@ export function CloudSyncPanel({
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [cloudEmpty, setCloudEmpty] = useState<boolean | null>(null)
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null)
+  const [setupError, setSetupError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+    void getCurrentSession().then((session) => {
+      setSessionEmail(session?.user?.email ?? null)
+    })
+    const sb = getSupabase()
+    if (!sb) return
+    const {
+      data: { subscription },
+    } = sb.auth.onAuthStateChange((_event, session) => {
+      setSessionEmail(session?.user?.email ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
 
   if (!isSupabaseConfigured()) {
     return (
@@ -62,6 +79,7 @@ export function CloudSyncPanel({
     e.preventDefault()
     setBusy(true)
     setMessage(null)
+    setSetupError(null)
     const err = await signInWithMagicLink(email)
     setBusy(false)
     if (err) {
@@ -69,8 +87,35 @@ export function CloudSyncPanel({
       return
     }
     setMessage(
-      'Check your email for a sign-in link. After you click it, return here — this page will reload signed in.',
+      'Check your email for a sign-in link. Open it on this same device. After it loads the app, come back to Settings — you should see “Signed in as …”.',
     )
+  }
+
+  async function handleRetrySetup() {
+    setBusy(true)
+    setSetupError(null)
+    setMessage(null)
+    const session = await getCurrentSession()
+    if (!session?.user?.email) {
+      setBusy(false)
+      setSetupError('No active session. Send a new magic link and open it on this device.')
+      return
+    }
+    const { householdId, error } = await ensureHousehold(session.user.id)
+    setBusy(false)
+    if (!householdId) {
+      setSetupError(
+        error ??
+          'Could not finish household setup. Run supabase/fix-create-household.sql in the Supabase SQL Editor, then try again.',
+      )
+      return
+    }
+    onCloudChange({
+      session,
+      householdId,
+      email: session.user.email,
+    })
+    setMessage('Signed in and household ready.')
   }
 
   async function handleSignOut() {
@@ -78,6 +123,8 @@ export function CloudSyncPanel({
     await signOutCloud()
     onCloudChange(null)
     setCloudEmpty(null)
+    setSessionEmail(null)
+    setSetupError(null)
     setMessage('Signed out. This browser keeps its local copy.')
     setBusy(false)
   }
@@ -148,28 +195,62 @@ export function CloudSyncPanel({
           <div>
             <h3>Cloud sync</h3>
             <p>
-              Sign in to sync this ledger between devices. Your existing data
-              stays in this browser until you upload it.
+              {sessionEmail
+                ? `Auth session found for ${sessionEmail}, but household setup did not finish.`
+                : 'Sign in to sync this ledger between devices. Your existing data stays in this browser until you upload it.'}
             </p>
           </div>
         </div>
         <div className="settings-section-body">
-          <form className="cloud-sign-in-form" onSubmit={(e) => void handleSignIn(e)}>
-            <label>
-              Email{' '}
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-                autoComplete="email"
-              />
-            </label>
-            <button type="submit" className="primary" disabled={busy}>
-              Send magic link
-            </button>
-          </form>
+          {sessionEmail ? (
+            <div className="callout cloud-migrate-callout">
+              <p>
+                You’re signed in as <strong>{sessionEmail}</strong>, but the app
+                couldn’t create your household (a database permission issue).
+                Run <code>fix-create-household.sql</code> in Supabase SQL
+                Editor, then tap Retry below.
+              </p>
+              <div className="callout-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => void handleRetrySetup()}
+                  disabled={busy}
+                >
+                  Retry household setup
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => void handleSignOut()}
+                  disabled={busy}
+                >
+                  Sign out
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form
+              className="cloud-sign-in-form"
+              onSubmit={(e) => void handleSignIn(e)}
+            >
+              <label>
+                Email{' '}
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                  autoComplete="email"
+                />
+              </label>
+              <button type="submit" className="primary" disabled={busy}>
+                Send magic link
+              </button>
+            </form>
+          )}
+          {setupError ? <p className="backup-msg warn">{setupError}</p> : null}
           {message ? <p className="backup-msg">{message}</p> : null}
         </div>
       </section>
@@ -188,11 +269,16 @@ export function CloudSyncPanel({
         <div>
           <h3>Cloud sync</h3>
           <p>
-            Signed in as {cloud.email}. Changes auto-save to the cloud every few
-            seconds while you’re signed in.
+            Signed in as <strong>{cloud.email}</strong>. Changes auto-save to the
+            cloud every few seconds while you’re signed in.
           </p>
         </div>
-        <button type="button" className="ghost" onClick={() => void handleSignOut()} disabled={busy}>
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => void handleSignOut()}
+          disabled={busy}
+        >
           Sign out
         </button>
       </div>
@@ -200,10 +286,10 @@ export function CloudSyncPanel({
         {cloudEmpty && hasLocal ? (
           <div className="callout cloud-migrate-callout">
             <p>
-              <strong>This device has your ledger</strong> ({hasLocal ? 'transactions or imports found' : ''})
-              but the cloud is empty. Upload once from the browser where your
-              statements and screenshots live — that copies everything including
-              PDF/image files.
+              <strong>This device has your ledger</strong> but the cloud is
+              empty. Upload once from the browser where your statements and
+              screenshots live — that copies everything including PDF/image
+              files.
             </p>
             <div className="callout-actions">
               <button
@@ -237,7 +323,9 @@ export function CloudSyncPanel({
           </button>
         </div>
 
-        {message ? <p className="backup-msg">{message}</p> : (
+        {message ? (
+          <p className="backup-msg">{message}</p>
+        ) : (
           <p className="backup-msg muted">
             Trevor and Kate share one household ledger. The second person signs
             in with their email, then taps Download from cloud.
@@ -252,7 +340,7 @@ export async function bootstrapCloudSession(): Promise<CloudContext | null> {
   if (!isSupabaseConfigured()) return null
   const session = await getCurrentSession()
   if (!session?.user?.email) return null
-  const householdId = await ensureHousehold(session.user.id)
+  const { householdId } = await ensureHousehold(session.user.id)
   if (!householdId) return null
   return {
     session,

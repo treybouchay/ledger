@@ -501,7 +501,7 @@ export default function App() {
       data: { subscription },
     } = sb.auth.onAuthStateChange((_event, session) => {
       if (session?.user?.email) {
-        void ensureHousehold(session.user.id).then((householdId) => {
+        void ensureHousehold(session.user.id).then(({ householdId, error }) => {
           if (householdId) {
             setCloudContext({
               session,
@@ -509,6 +509,7 @@ export default function App() {
               email: session.user.email!,
             })
           } else {
+            console.error('[cloud] signed in but household failed', error)
             setCloudContext(null)
           }
         })
