@@ -357,6 +357,50 @@ export async function pushCloudBackup(
   const sb = getSupabase()
   if (!sb) return
 
+  // Full replace for this household so Save/Download match one device's ledger
+  // (upsert-only left stale phone rows in the cloud and skewed leftovers).
+  const { error: delTxErr } = await sb
+    .from('transactions')
+    .delete()
+    .eq('household_id', householdId)
+  if (delTxErr) throw new Error(delTxErr.message)
+
+  const { error: delImpErr } = await sb
+    .from('statement_imports')
+    .delete()
+    .eq('household_id', householdId)
+  if (delImpErr) throw new Error(delImpErr.message)
+
+  const { error: delCatErr } = await sb
+    .from('custom_categories')
+    .delete()
+    .eq('household_id', householdId)
+  if (delCatErr) throw new Error(delCatErr.message)
+
+  const { error: delAccErr } = await sb
+    .from('custom_accounts')
+    .delete()
+    .eq('household_id', householdId)
+  if (delAccErr) throw new Error(delAccErr.message)
+
+  const { error: delBudErr } = await sb
+    .from('budget_overrides')
+    .delete()
+    .eq('household_id', householdId)
+  if (delBudErr) throw new Error(delBudErr.message)
+
+  const { error: delIncErr } = await sb
+    .from('income_overrides')
+    .delete()
+    .eq('household_id', householdId)
+  if (delIncErr) throw new Error(delIncErr.message)
+
+  const { error: delRuleErr } = await sb
+    .from('learned_rules')
+    .delete()
+    .eq('household_id', householdId)
+  if (delRuleErr) throw new Error(delRuleErr.message)
+
   const txRows = backup.transactions.map((t) => transactionRow(householdId, t))
   const impRows = backup.imports.map((item) => {
     const path =
@@ -367,16 +411,12 @@ export async function pushCloudBackup(
   })
 
   if (txRows.length > 0) {
-    const { error } = await sb.from('transactions').upsert(txRows, {
-      onConflict: 'id,household_id',
-    })
+    const { error } = await sb.from('transactions').insert(txRows)
     if (error) throw new Error(error.message)
   }
 
   if (impRows.length > 0) {
-    const { error } = await sb.from('statement_imports').upsert(impRows, {
-      onConflict: 'id,household_id',
-    })
+    const { error } = await sb.from('statement_imports').insert(impRows)
     if (error) throw new Error(error.message)
   }
 
@@ -390,9 +430,7 @@ export async function pushCloudBackup(
     updated_at: new Date().toISOString(),
   }))
   if (catRows.length > 0) {
-    const { error } = await sb.from('custom_categories').upsert(catRows, {
-      onConflict: 'id,household_id',
-    })
+    const { error } = await sb.from('custom_categories').insert(catRows)
     if (error) throw new Error(error.message)
   }
 
@@ -405,9 +443,7 @@ export async function pushCloudBackup(
     updated_at: new Date().toISOString(),
   }))
   if (accRows.length > 0) {
-    const { error } = await sb.from('custom_accounts').upsert(accRows, {
-      onConflict: 'id,household_id',
-    })
+    const { error } = await sb.from('custom_accounts').insert(accRows)
     if (error) throw new Error(error.message)
   }
 
@@ -419,9 +455,7 @@ export async function pushCloudBackup(
     updated_at: new Date().toISOString(),
   }))
   if (budRows.length > 0) {
-    const { error } = await sb.from('budget_overrides').upsert(budRows, {
-      onConflict: 'household_id,person_id,category_id',
-    })
+    const { error } = await sb.from('budget_overrides').insert(budRows)
     if (error) throw new Error(error.message)
   }
 
@@ -434,9 +468,7 @@ export async function pushCloudBackup(
       updated_at: new Date().toISOString(),
     }))
   if (incRows.length > 0) {
-    const { error } = await sb.from('income_overrides').upsert(incRows, {
-      onConflict: 'household_id,person_id',
-    })
+    const { error } = await sb.from('income_overrides').insert(incRows)
     if (error) throw new Error(error.message)
   }
 
@@ -450,9 +482,7 @@ export async function pushCloudBackup(
     updated_at: new Date().toISOString(),
   }))
   if (ruleRows.length > 0) {
-    const { error } = await sb.from('learned_rules').upsert(ruleRows, {
-      onConflict: 'id,household_id',
-    })
+    const { error } = await sb.from('learned_rules').insert(ruleRows)
     if (error) throw new Error(error.message)
   }
 
