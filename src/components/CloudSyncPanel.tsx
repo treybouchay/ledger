@@ -385,7 +385,7 @@ export function CloudSyncPanel({
             <div className="callout-actions">
               <button
                 type="button"
-                className="primary"
+                className="primary sync-btn sync-btn-upload"
                 onClick={() => void handleUploadDevice()}
                 disabled={busy}
               >
@@ -395,10 +395,10 @@ export function CloudSyncPanel({
           </div>
         ) : null}
 
-        <div className="callout-actions settings-actions">
+        <div className="callout-actions settings-actions sync-actions">
           <button
             type="button"
-            className="ghost"
+            className="sync-btn sync-btn-save"
             onClick={() => void handlePushNow()}
             disabled={busy}
           >
@@ -406,7 +406,7 @@ export function CloudSyncPanel({
           </button>
           <button
             type="button"
-            className="ghost"
+            className="sync-btn sync-btn-download"
             onClick={() => void handlePullCloud()}
             disabled={busy}
           >
@@ -442,7 +442,7 @@ export function CloudSyncPanel({
                   <div className="callout-actions">
                     <button
                       type="button"
-                      className="ghost"
+                      className="sync-btn sync-btn-restore"
                       disabled={busy}
                       onClick={() => void handleRestoreSnapshot(snap, false)}
                     >
@@ -450,7 +450,7 @@ export function CloudSyncPanel({
                     </button>
                     <button
                       type="button"
-                      className="ghost"
+                      className="sync-btn sync-btn-restore-cloud"
                       disabled={busy}
                       onClick={() => void handleRestoreSnapshot(snap, true)}
                     >

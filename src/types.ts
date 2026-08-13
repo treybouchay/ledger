@@ -19,6 +19,7 @@ export type BuiltInCategoryId =
   | 'take_out'
   | 'coffee'
   | 'cellphone'
+  | 'bell_bundle'
   | 'entertainment'
   | 'amazon'
   | 'internet'

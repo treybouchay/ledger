@@ -356,6 +356,7 @@ const BUILTIN_ICONS: Record<
   take_out: IconTakeout,
   coffee: IconCup,
   cellphone: IconPhone,
+  bell_bundle: IconWifi,
   entertainment: IconTicket,
   amazon: IconPackage,
   internet: IconWifi,
