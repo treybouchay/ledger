@@ -35,7 +35,7 @@ export const CATEGORIES: Category[] = [
   { id: 'cellphone', label: 'Cellphone Bill', icon: '📱', kind: 'fixed', ledgerTracked: false },
   {
     id: 'bell_bundle',
-    label: 'Bell Bundle (mobile + internet + TV)',
+    label: 'Bell Bundle',
     icon: '📡',
     kind: 'fixed',
     ledgerTracked: false,

@@ -445,33 +445,27 @@ select {
   filter: brightness(0.97);
 }
 
-/* Save / upload — teal (push to cloud) */
-.sync-btn-save,
-.sync-btn-upload {
-  background: color-mix(in srgb, var(--accent) 88%, #0a3d32);
-  color: #f4faf7;
-  border-color: color-mix(in srgb, var(--accent) 70%, #08352c);
-}
-
-/* Download — steel blue (pull from cloud) */
-.sync-btn-download {
-  background: #3b6ea5;
-  color: #f5f9fc;
-  border-color: #2f5a88;
-}
-
-/* Restore this device only — warm amber */
-.sync-btn-restore {
-  background: #f3e6d0;
-  color: #5c4018;
-  border-color: #e0c79a;
-}
-
-/* Restore + overwrite live cloud — stronger amber/rust */
+/* Primary sync actions — filled brand accent */
+.sync-btn-sync,
+.sync-btn-upload,
 .sync-btn-restore-cloud {
-  background: #c4783a;
-  color: #fff8f0;
-  border-color: #a8622c;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+/* Secondary — same accent, outline only */
+.sync-btn-save,
+.sync-btn-restore {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sync-btn-save:hover:not(:disabled),
+.sync-btn-restore:hover:not(:disabled) {
+  filter: none;
+  background: color-mix(in srgb, var(--accent-soft) 55%, #fff);
 }
 
 .callout {

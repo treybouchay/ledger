@@ -398,19 +398,19 @@ export function CloudSyncPanel({
         <div className="callout-actions settings-actions sync-actions">
           <button
             type="button"
+            className="sync-btn sync-btn-sync"
+            onClick={() => void handlePullCloud()}
+            disabled={busy}
+          >
+            Sync with cloud
+          </button>
+          <button
+            type="button"
             className="sync-btn sync-btn-save"
             onClick={() => void handlePushNow()}
             disabled={busy}
           >
-            Save to cloud now
-          </button>
-          <button
-            type="button"
-            className="sync-btn sync-btn-download"
-            onClick={() => void handlePullCloud()}
-            disabled={busy}
-          >
-            Download from cloud
+            Save to cloud
           </button>
         </div>
 
@@ -423,7 +423,7 @@ export function CloudSyncPanel({
           </p>
           {snapshots.length === 0 ? (
             <p className="backup-msg muted">
-              No snapshots yet. Tap Save to cloud now (after running{' '}
+              No snapshots yet. Tap Save to cloud (after running{' '}
               <code>add-ledger-snapshots.sql</code> in Supabase if this list
               stays empty).
             </p>
@@ -442,19 +442,19 @@ export function CloudSyncPanel({
                   <div className="callout-actions">
                     <button
                       type="button"
-                      className="sync-btn sync-btn-restore"
-                      disabled={busy}
-                      onClick={() => void handleRestoreSnapshot(snap, false)}
-                    >
-                      Restore here
-                    </button>
-                    <button
-                      type="button"
                       className="sync-btn sync-btn-restore-cloud"
                       disabled={busy}
                       onClick={() => void handleRestoreSnapshot(snap, true)}
                     >
                       Restore + set cloud
+                    </button>
+                    <button
+                      type="button"
+                      className="sync-btn sync-btn-restore"
+                      disabled={busy}
+                      onClick={() => void handleRestoreSnapshot(snap, false)}
+                    >
+                      Restore here
                     </button>
                   </div>
                 </li>
@@ -467,8 +467,8 @@ export function CloudSyncPanel({
           <p className="backup-msg">{message}</p>
         ) : (
           <p className="backup-msg muted">
-            Phone → Save, then laptop → Download (or the reverse). Trevor and
-            Kate share one household.
+            Phone → Save to cloud, then laptop → Sync with cloud (or the
+            reverse). Trevor and Kate share one household.
           </p>
         )}
       </div>

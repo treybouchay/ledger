@@ -19,6 +19,33 @@ let customCategoriesCache: Category[] = loadCustomCategoriesFromStorage()
 let budgetOverridesCache: BudgetLine[] = loadBudgetOverridesFromStorage()
 let incomeOverridesCache: IncomeOverrides = loadIncomeOverridesFromStorage()
 
+/** Drop old cellphone/internet overrides so seed Bell Bundle ($315.79) shows in Fixed bills. */
+function clearSupersededBellLineOverrides(): void {
+  const hasLegacy = budgetOverridesCache.some(
+    (b) =>
+      b.personId === 'trevor' &&
+      (b.categoryId === 'cellphone' || b.categoryId === 'internet') &&
+      b.amount > 0,
+  )
+  if (!hasLegacy) return
+  budgetOverridesCache = budgetOverridesCache.filter(
+    (b) =>
+      !(
+        b.personId === 'trevor' &&
+        (b.categoryId === 'cellphone' ||
+          b.categoryId === 'internet' ||
+          b.categoryId === 'bell_bundle')
+      ),
+  )
+  try {
+    localStorage.setItem(BUDGETS_KEY, JSON.stringify(budgetOverridesCache))
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+clearSupersededBellLineOverrides()
+
 function budgetKey(personId: PersonId, categoryId: string): string {
   return `${personId}:${categoryId}`
 }
@@ -189,6 +216,7 @@ export function replaceCustomCategories(next: Category[]): void {
 
 export function replaceBudgetOverrides(next: BudgetLine[]): void {
   budgetOverridesCache = next.filter(isValidBudgetLine)
+  clearSupersededBellLineOverrides()
   localStorage.setItem(BUDGETS_KEY, JSON.stringify(budgetOverridesCache))
 }
 
