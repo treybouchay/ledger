@@ -811,6 +811,40 @@ export function realizedFlipProfitForMonth(
   }
 }
 
+/** Non-gear cash-outs dated in `monthId` (YYYY-MM). */
+export function nonGearSpendForMonth(
+  cash: GearCashMove[],
+  monthId: string,
+): number {
+  if (!/^\d{4}-\d{2}$/.test(monthId)) return 0
+  let sum = 0
+  for (const m of cash) {
+    if (!isNonGearSpend(m)) continue
+    if ((m.date?.trim().slice(0, 7) ?? '') !== monthId) continue
+    const amount = Number(m.amount)
+    if (!Number.isFinite(amount) || amount <= 0) continue
+    sum += amount
+  }
+  return Math.round(sum * 100) / 100
+}
+
+/**
+ * Gross linked-sell cash made for the month, minus non-gear spends that month.
+ * Used on the home overview “Total cash made” figure.
+ */
+export function netCashMadeForMonth(
+  cash: GearCashMove[],
+  monthId: string,
+): { sold: number; nonGear: number; net: number } {
+  const sold = realizedFlipProfitForMonth(cash, monthId).sold
+  const nonGear = nonGearSpendForMonth(cash, monthId)
+  return {
+    sold,
+    nonGear,
+    net: Math.round((sold - nonGear) * 100) / 100,
+  }
+}
+
 export type GearInsightsPeriod = 'all' | 'month'
 
 export interface CompletedFlipInsight {
