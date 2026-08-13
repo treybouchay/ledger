@@ -33,6 +33,69 @@ function formatSyncTime(iso: string | null): string {
   })
 }
 
+const RECENT_SNAPSHOT_COUNT = 3
+
+function SnapshotHistoryList({
+  snapshots,
+  busy,
+  onRestore,
+}: {
+  snapshots: CloudSnapshotMeta[]
+  busy: boolean
+  onRestore: (snap: CloudSnapshotMeta, pushAsCurrent: boolean) => void
+}) {
+  return (
+    <ul className="cloud-snapshot-list">
+      {snapshots.map((snap) => {
+        const source = syncSourceFromDeviceLabel(snap.deviceLabel)
+        const deviceName = snap.deviceLabel ?? 'Device'
+        return (
+          <li key={snap.id} className="cloud-snapshot-row">
+            <div className="cloud-snapshot-meta">
+              <span
+                className="cloud-snapshot-device"
+                title={`Saved from ${deviceName}`}
+              >
+                <SyncSourceIcon
+                  source={source}
+                  className="cloud-snapshot-device-icon"
+                />
+                <span className="cloud-snapshot-device-label">
+                  {source === 'phone' ? 'Phone' : 'Desktop'}
+                </span>
+              </span>
+              <strong>{formatSyncTime(snap.createdAt)}</strong>
+              <span className="cloud-snapshot-detail">
+                {deviceName}
+                {snap.label ? ` · ${snap.label}` : ''}
+                {` · ${snap.transactionCount} tx · ${snap.importCount} imports`}
+              </span>
+            </div>
+            <div className="callout-actions">
+              <button
+                type="button"
+                className="sync-btn sync-btn-restore-cloud"
+                disabled={busy}
+                onClick={() => onRestore(snap, true)}
+              >
+                Restore + set cloud
+              </button>
+              <button
+                type="button"
+                className="sync-btn sync-btn-restore"
+                disabled={busy}
+                onClick={() => onRestore(snap, false)}
+              >
+                Restore here
+              </button>
+            </div>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 export function CloudSyncPanel({
   cloud,
   onCloudChange,
@@ -57,6 +120,7 @@ export function CloudSyncPanel({
     getLastCloudDownloadedAt(),
   )
   const [snapshots, setSnapshots] = useState<CloudSnapshotMeta[]>([])
+  const [historyPage, setHistoryPage] = useState<'recent' | 'all'>('recent')
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return
@@ -76,6 +140,7 @@ export function CloudSyncPanel({
   useEffect(() => {
     if (!cloud) {
       setSnapshots([])
+      setHistoryPage('recent')
       return
     }
     void listLedgerSnapshots(cloud.householdId).then(setSnapshots)
@@ -343,6 +408,47 @@ export function CloudSyncPanel({
   }
 
   const hasLocal = localDeviceHasData()
+  const recentSnapshots = snapshots.slice(0, RECENT_SNAPSHOT_COUNT)
+  const hasMoreSnapshots = snapshots.length > RECENT_SNAPSHOT_COUNT
+
+  if (historyPage === 'all') {
+    return (
+      <section className="panel settings-panel cloud-sync-panel">
+        <div className="panel-header">
+          <div>
+            <h3>All sync history</h3>
+            <p>
+              Every saved snapshot (last {snapshots.length} kept). Restore here
+              only affects this device; Restore + set cloud also overwrites the
+              live cloud ledger.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setHistoryPage('recent')}
+            disabled={busy}
+          >
+            Back to Cloud sync
+          </button>
+        </div>
+        <div className="settings-section-body">
+          {snapshots.length === 0 ? (
+            <p className="backup-msg muted">No snapshots yet.</p>
+          ) : (
+            <SnapshotHistoryList
+              snapshots={snapshots}
+              busy={busy}
+              onRestore={(snap, pushAsCurrent) =>
+                void handleRestoreSnapshot(snap, pushAsCurrent)
+              }
+            />
+          )}
+          {message ? <p className="backup-msg">{message}</p> : null}
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section className="panel settings-panel cloud-sync-panel">
@@ -421,17 +527,9 @@ export function CloudSyncPanel({
         <div className="cloud-snapshot-history">
           <h4>Sync history</h4>
           <p className="muted">
-            Point-in-time copies from Save / Upload. Two restore choices:
-            <br />
-            <strong>Restore here</strong> — try that snapshot on this device
-            only. Cloud (and your other devices) stay unchanged until you Save.
-            <br />
-            <strong>Restore + set cloud</strong> — same restore, and also
-            overwrite the live cloud ledger so phone and laptop both get this
-            version on next Sync. Use when you want that older copy to become
-            the household source of truth.
-            <br />
-            Statement files are not versioned — only ledger data.
+            Latest {RECENT_SNAPSHOT_COUNT} saves. <strong>Restore here</strong>{' '}
+            affects this device only; <strong>Restore + set cloud</strong> also
+            overwrites the live cloud ledger for your other devices.
           </p>
           {snapshots.length === 0 ? (
             <p className="backup-msg muted">
@@ -440,54 +538,27 @@ export function CloudSyncPanel({
               stays empty).
             </p>
           ) : (
-            <ul className="cloud-snapshot-list">
-              {snapshots.map((snap) => {
-                const source = syncSourceFromDeviceLabel(snap.deviceLabel)
-                const deviceName = snap.deviceLabel ?? 'Device'
-                return (
-                <li key={snap.id} className="cloud-snapshot-row">
-                  <div className="cloud-snapshot-meta">
-                    <span
-                      className="cloud-snapshot-device"
-                      title={`Saved from ${deviceName}`}
-                    >
-                      <SyncSourceIcon
-                        source={source}
-                        className="cloud-snapshot-device-icon"
-                      />
-                      <span className="cloud-snapshot-device-label">
-                        {source === 'phone' ? 'Phone' : 'Desktop'}
-                      </span>
-                    </span>
-                    <strong>{formatSyncTime(snap.createdAt)}</strong>
-                    <span className="cloud-snapshot-detail">
-                      {deviceName}
-                      {snap.label ? ` · ${snap.label}` : ''}
-                      {` · ${snap.transactionCount} tx · ${snap.importCount} imports`}
-                    </span>
-                  </div>
-                  <div className="callout-actions">
-                    <button
-                      type="button"
-                      className="sync-btn sync-btn-restore-cloud"
-                      disabled={busy}
-                      onClick={() => void handleRestoreSnapshot(snap, true)}
-                    >
-                      Restore + set cloud
-                    </button>
-                    <button
-                      type="button"
-                      className="sync-btn sync-btn-restore"
-                      disabled={busy}
-                      onClick={() => void handleRestoreSnapshot(snap, false)}
-                    >
-                      Restore here
-                    </button>
-                  </div>
-                </li>
-                )
-              })}
-            </ul>
+            <>
+              <SnapshotHistoryList
+                snapshots={recentSnapshots}
+                busy={busy}
+                onRestore={(snap, pushAsCurrent) =>
+                  void handleRestoreSnapshot(snap, pushAsCurrent)
+                }
+              />
+              {hasMoreSnapshots ? (
+                <div className="cloud-snapshot-view-all">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setHistoryPage('all')}
+                    disabled={busy}
+                  >
+                    View all ({snapshots.length})
+                  </button>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
 
