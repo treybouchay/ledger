@@ -12,6 +12,10 @@
   --accent-soft: #cfe0d7;
   --accent-mid: #8fb59f;
   --accent-ink: #f4faf7;
+  /* Warm leftover gold — used for cloud Sync / Save actions */
+  --sync: #d2a66a;
+  --sync-soft: #efe0c8;
+  --sync-ink: #2a2115;
   /* Warm rose — complementary to accent teal for restore / history actions */
   --accent-comp: #8a4f55;
   --accent-comp-soft: #ead8da;
@@ -482,24 +486,24 @@ select {
   filter: brightness(0.97);
 }
 
-/* Primary sync actions — filled brand accent */
+/* Primary sync actions — leftover gold from the income bar */
 .sync-btn-sync,
 .sync-btn-upload {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: var(--accent);
+  background: var(--sync);
+  color: var(--sync-ink);
+  border-color: color-mix(in srgb, var(--sync) 75%, #8a6a35);
 }
 
-/* Secondary sync — accent outline */
+/* Secondary sync — same gold, outline only */
 .sync-btn-save {
   background: transparent;
-  color: var(--accent);
-  border-color: var(--accent);
+  color: color-mix(in srgb, var(--sync) 55%, var(--ink));
+  border-color: var(--sync);
 }
 
 .sync-btn-save:hover:not(:disabled) {
   filter: none;
-  background: color-mix(in srgb, var(--accent-soft) 55%, #fff);
+  background: color-mix(in srgb, var(--sync-soft) 70%, #fff);
 }
 
 /* Restore history — complementary warm rose */

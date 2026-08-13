@@ -421,10 +421,16 @@ export function CloudSyncPanel({
         <div className="cloud-snapshot-history">
           <h4>Sync history</h4>
           <p className="muted">
-            Point-in-time copies from Save / Upload. <strong>Restore here</strong>{' '}
-            loads that copy onto this device only (cloud unchanged).{' '}
-            <strong>Restore + set cloud</strong> also overwrites the live cloud
-            ledger so phone and laptop both get this version on next sync.
+            Point-in-time copies from Save / Upload. Two restore choices:
+            <br />
+            <strong>Restore here</strong> — try that snapshot on this device
+            only. Cloud (and your other devices) stay unchanged until you Save.
+            <br />
+            <strong>Restore + set cloud</strong> — same restore, and also
+            overwrite the live cloud ledger so phone and laptop both get this
+            version on next Sync. Use when you want that older copy to become
+            the household source of truth.
+            <br />
             Statement files are not versioned — only ledger data.
           </p>
           {snapshots.length === 0 ? (
