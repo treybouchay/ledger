@@ -207,6 +207,15 @@ function IconLaptop(props: IconSvgProps) {
   )
 }
 
+function IconDesktop(props: IconSvgProps) {
+  return (
+    <LineIcon {...props}>
+      <rect x="2.4" y="2.6" width="11.2" height="8.2" rx="1.1" />
+      <path d="M6.2 13.4h3.6M8 10.8v2.6" />
+    </LineIcon>
+  )
+}
+
 function IconBrain(props: IconSvgProps) {
   return (
     <LineIcon {...props}>
@@ -395,5 +404,19 @@ export function CategoryLineIcon({
     (BUILTIN_ICONS as Record<string, (props: IconSvgProps) => ReactElement>)[
       categoryId
     ] ?? IconTag
+  return <Icon size={size} className={className} />
+}
+
+/** Phone or desktop line icon for sync history device source. */
+export function SyncSourceIcon({
+  source,
+  size = 15,
+  className,
+}: {
+  source: 'phone' | 'desktop'
+  size?: number
+  className?: string
+}) {
+  const Icon = source === 'phone' ? IconPhone : IconDesktop
   return <Icon size={size} className={className} />
 }

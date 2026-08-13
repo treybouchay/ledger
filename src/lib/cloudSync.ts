@@ -659,6 +659,15 @@ function shortDeviceLabel(): string {
   return 'Browser'
 }
 
+/** Map stored snapshot device labels to phone vs desktop for UI icons. */
+export function syncSourceFromDeviceLabel(
+  label: string | null | undefined,
+): 'phone' | 'desktop' {
+  if (!label) return 'desktop'
+  if (/iphone|ipad|android|phone|mobile/i.test(label)) return 'phone'
+  return 'desktop'
+}
+
 function formatSnapshotLabel(backup: HouseholdBackup): string {
   return `${backup.transactions.length} tx · ${backup.imports.length} imports`
 }

@@ -410,6 +410,31 @@ select {
   background: color-mix(in srgb, var(--surface, #fff) 88%, #e8eee9);
 }
 
+.cloud-snapshot-meta {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.cloud-snapshot-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: fit-content;
+  margin-bottom: 0.1rem;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.cloud-snapshot-device-icon {
+  flex-shrink: 0;
+}
+
+.cloud-snapshot-device-label {
+  line-height: 1;
+}
+
 .cloud-snapshot-detail {
   display: block;
   margin-top: 0.2rem;

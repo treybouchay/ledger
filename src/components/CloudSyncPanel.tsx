@@ -12,9 +12,11 @@ import {
   restoreLedgerSnapshot,
   signInWithMagicLink,
   signOutCloud,
+  syncSourceFromDeviceLabel,
   type CloudContext,
   type CloudSnapshotMeta,
 } from '../lib/cloudSync'
+import { SyncSourceIcon } from '../lib/categoryIcons'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase'
 import type { HouseholdBackup } from '../lib/backup'
 
@@ -429,12 +431,27 @@ export function CloudSyncPanel({
             </p>
           ) : (
             <ul className="cloud-snapshot-list">
-              {snapshots.map((snap) => (
+              {snapshots.map((snap) => {
+                const source = syncSourceFromDeviceLabel(snap.deviceLabel)
+                const deviceName = snap.deviceLabel ?? 'Device'
+                return (
                 <li key={snap.id} className="cloud-snapshot-row">
-                  <div>
+                  <div className="cloud-snapshot-meta">
+                    <span
+                      className="cloud-snapshot-device"
+                      title={`Saved from ${deviceName}`}
+                    >
+                      <SyncSourceIcon
+                        source={source}
+                        className="cloud-snapshot-device-icon"
+                      />
+                      <span className="cloud-snapshot-device-label">
+                        {source === 'phone' ? 'Phone' : 'Desktop'}
+                      </span>
+                    </span>
                     <strong>{formatSyncTime(snap.createdAt)}</strong>
                     <span className="cloud-snapshot-detail">
-                      {snap.deviceLabel ?? 'Device'}
+                      {deviceName}
                       {snap.label ? ` · ${snap.label}` : ''}
                       {` · ${snap.transactionCount} tx · ${snap.importCount} imports`}
                     </span>
@@ -458,7 +475,8 @@ export function CloudSyncPanel({
                     </button>
                   </div>
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
         </div>
