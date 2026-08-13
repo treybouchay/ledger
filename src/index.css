@@ -12,6 +12,10 @@
   --accent-soft: #cfe0d7;
   --accent-mid: #8fb59f;
   --accent-ink: #f4faf7;
+  /* Warm rose — complementary to accent teal for restore / history actions */
+  --accent-comp: #8a4f55;
+  --accent-comp-soft: #ead8da;
+  --accent-comp-ink: #fff7f7;
   --surface-tint: #d5eadc;
   --surface-muted: #e6eee9;
   --surface-hover: #f3f8f5;
@@ -472,25 +476,40 @@ select {
 
 /* Primary sync actions — filled brand accent */
 .sync-btn-sync,
-.sync-btn-upload,
-.sync-btn-restore-cloud {
+.sync-btn-upload {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: var(--accent);
 }
 
-/* Secondary — same accent, outline only */
-.sync-btn-save,
-.sync-btn-restore {
+/* Secondary sync — accent outline */
+.sync-btn-save {
   background: transparent;
   color: var(--accent);
   border-color: var(--accent);
 }
 
-.sync-btn-save:hover:not(:disabled),
-.sync-btn-restore:hover:not(:disabled) {
+.sync-btn-save:hover:not(:disabled) {
   filter: none;
   background: color-mix(in srgb, var(--accent-soft) 55%, #fff);
+}
+
+/* Restore history — complementary warm rose */
+.sync-btn-restore-cloud {
+  background: var(--accent-comp);
+  color: var(--accent-comp-ink);
+  border-color: var(--accent-comp);
+}
+
+.sync-btn-restore {
+  background: transparent;
+  color: var(--accent-comp);
+  border-color: var(--accent-comp);
+}
+
+.sync-btn-restore:hover:not(:disabled) {
+  filter: none;
+  background: color-mix(in srgb, var(--accent-comp-soft) 60%, #fff);
 }
 
 .callout {

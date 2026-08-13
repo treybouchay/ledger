@@ -419,9 +419,11 @@ export function CloudSyncPanel({
         <div className="cloud-snapshot-history">
           <h4>Sync history</h4>
           <p className="muted">
-            Point-in-time copies from Save / Upload. Restore into this device,
-            or restore and make it the live cloud copy. Statement PDF/screenshot
-            files are not versioned — only ledger data.
+            Point-in-time copies from Save / Upload. <strong>Restore here</strong>{' '}
+            loads that copy onto this device only (cloud unchanged).{' '}
+            <strong>Restore + set cloud</strong> also overwrites the live cloud
+            ledger so phone and laptop both get this version on next sync.
+            Statement files are not versioned — only ledger data.
           </p>
           {snapshots.length === 0 ? (
             <p className="backup-msg muted">
