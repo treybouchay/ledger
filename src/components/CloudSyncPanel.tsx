@@ -16,7 +16,7 @@ import {
   type CloudContext,
   type CloudSnapshotMeta,
 } from '../lib/cloudSync'
-import { SyncSourceIcon } from '../lib/categoryIcons'
+import { SyncCloudArrowIcon, SyncSourceIcon } from '../lib/categoryIcons'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase'
 import type { HouseholdBackup } from '../lib/backup'
 
@@ -404,6 +404,7 @@ export function CloudSyncPanel({
             onClick={() => void handlePullCloud()}
             disabled={busy}
           >
+            <SyncCloudArrowIcon direction="down" className="sync-btn-icon" />
             Sync with cloud
           </button>
           <button
@@ -412,6 +413,7 @@ export function CloudSyncPanel({
             onClick={() => void handlePushNow()}
             disabled={busy}
           >
+            <SyncCloudArrowIcon direction="up" className="sync-btn-icon" />
             Save to cloud
           </button>
         </div>

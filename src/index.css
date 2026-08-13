@@ -451,6 +451,10 @@ select {
 }
 
 .sync-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
   justify-self: start;
   border-radius: 12px;
   padding: 0.7rem 1.1rem;
@@ -463,6 +467,10 @@ select {
     background 0.15s ease,
     border-color 0.15s ease,
     color 0.15s ease;
+}
+
+.sync-btn-icon {
+  flex-shrink: 0;
 }
 
 .sync-btn:disabled {

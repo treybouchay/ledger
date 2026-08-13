@@ -420,3 +420,35 @@ export function SyncSourceIcon({
   const Icon = source === 'phone' ? IconPhone : IconDesktop
   return <Icon size={size} className={className} />
 }
+
+function IconArrowDown(props: IconSvgProps) {
+  return (
+    <LineIcon {...props}>
+      <path d="M8 2.5v11" />
+      <path d="M4.2 9.8 8 13.5l3.8-3.7" />
+    </LineIcon>
+  )
+}
+
+function IconArrowUp(props: IconSvgProps) {
+  return (
+    <LineIcon {...props}>
+      <path d="M8 13.5v-11" />
+      <path d="M4.2 6.2 8 2.5l3.8 3.7" />
+    </LineIcon>
+  )
+}
+
+/** Down = pull/sync from cloud; up = save/push to cloud. */
+export function SyncCloudArrowIcon({
+  direction,
+  size = 15,
+  className,
+}: {
+  direction: 'down' | 'up'
+  size?: number
+  className?: string
+}) {
+  const Icon = direction === 'down' ? IconArrowDown : IconArrowUp
+  return <Icon size={size} className={className} />
+}
