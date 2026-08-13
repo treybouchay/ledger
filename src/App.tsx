@@ -87,7 +87,6 @@ import { confirmRemove } from './lib/confirm'
 import {
   ensureHousehold,
   migrateDeviceToCloud,
-  pushCloudBackup,
   type CloudContext,
 } from './lib/cloudSync'
 import { getSupabase, isSupabaseConfigured } from './lib/supabase'
@@ -539,8 +538,9 @@ export default function App() {
           backup.customAccounts = getCustomAccounts()
           backup.budgetOverrides = getBudgetOverrides()
           backup.incomes = getIncomeOverrides()
-          await pushCloudBackup(cloudContext.householdId, backup)
-          await migrateDeviceToCloud(cloudContext.householdId, backup)
+          await migrateDeviceToCloud(cloudContext.householdId, backup, {
+            snapshot: false,
+          })
         } catch (err) {
           console.error('[cloud] auto sync failed', err)
         }

@@ -107,6 +107,15 @@ Statement **View** will fetch files from cloud storage if they aren’t cached l
 
 ---
 
+## Sync history (optional)
+
+After the first successful Save, run `supabase/add-ledger-snapshots.sql` in the
+SQL Editor once. Settings → Cloud sync will then keep the last **10** Save /
+Upload snapshots so you can restore on a device (or restore and set as the live
+cloud copy).
+
+---
+
 ## Troubleshooting
 
 | Issue | Fix |

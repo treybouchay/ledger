@@ -1,4 +1,4 @@
-import { applyBackup, buildBackup, type HouseholdBackup } from './backup'
+import { applyBackup, buildBackup, parseBackup, type HouseholdBackup } from './backup'
 import {
   getBudgetOverrides,
   getCustomCategories,
@@ -599,10 +599,186 @@ export function buildBackupFromModules(input?: Parameters<typeof buildBackup>[0]
   return buildBackup(input)
 }
 
-/** Upload everything on this device to the cloud (first-time migration). */
+const SNAPSHOT_KEEP = 10
+const LAST_SAVED_KEY = 'household-ledger.cloud-last-saved.v1'
+const LAST_DOWNLOADED_KEY = 'household-ledger.cloud-last-downloaded.v1'
+
+export interface CloudSnapshotMeta {
+  id: string
+  createdAt: string
+  label: string | null
+  deviceLabel: string | null
+  transactionCount: number
+  importCount: number
+}
+
+export function getLastCloudSavedAt(): string | null {
+  try {
+    return localStorage.getItem(LAST_SAVED_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function getLastCloudDownloadedAt(): string | null {
+  try {
+    return localStorage.getItem(LAST_DOWNLOADED_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function markCloudSavedNow(): string {
+  const iso = new Date().toISOString()
+  try {
+    localStorage.setItem(LAST_SAVED_KEY, iso)
+  } catch {
+    /* ignore */
+  }
+  return iso
+}
+
+export function markCloudDownloadedNow(): string {
+  const iso = new Date().toISOString()
+  try {
+    localStorage.setItem(LAST_DOWNLOADED_KEY, iso)
+  } catch {
+    /* ignore */
+  }
+  return iso
+}
+
+function shortDeviceLabel(): string {
+  if (typeof navigator === 'undefined') return 'Unknown device'
+  const ua = navigator.userAgent
+  if (/iPhone|iPad/i.test(ua)) return 'iPhone / iPad'
+  if (/Android/i.test(ua)) return 'Android'
+  if (/Mac/i.test(ua)) return 'Mac'
+  if (/Windows/i.test(ua)) return 'Windows'
+  if (/Linux/i.test(ua)) return 'Linux'
+  return 'Browser'
+}
+
+function formatSnapshotLabel(backup: HouseholdBackup): string {
+  return `${backup.transactions.length} tx · ${backup.imports.length} imports`
+}
+
+/** Point-in-time snapshot after explicit Save / Upload (not every auto-save). */
+export async function saveLedgerSnapshot(
+  householdId: string,
+  backup: HouseholdBackup,
+  label?: string,
+): Promise<void> {
+  const sb = getSupabase()
+  if (!sb) return
+
+  const {
+    data: { user },
+  } = await sb.auth.getUser()
+
+  const { error } = await sb.from('ledger_snapshots').insert({
+    household_id: householdId,
+    created_by: user?.id ?? null,
+    label: label ?? formatSnapshotLabel(backup),
+    device_label: shortDeviceLabel(),
+    transaction_count: backup.transactions.length,
+    import_count: backup.imports.length,
+    payload: backup,
+  })
+
+  if (error) {
+    console.warn('[cloud] snapshot save skipped', error.message)
+    return
+  }
+
+  const { data: rows, error: listErr } = await sb
+    .from('ledger_snapshots')
+    .select('id')
+    .eq('household_id', householdId)
+    .order('created_at', { ascending: false })
+
+  if (listErr || !rows || rows.length <= SNAPSHOT_KEEP) return
+
+  const dropIds = rows.slice(SNAPSHOT_KEEP).map((r) => String(r.id))
+  if (dropIds.length === 0) return
+  const { error: delErr } = await sb
+    .from('ledger_snapshots')
+    .delete()
+    .in('id', dropIds)
+  if (delErr) console.warn('[cloud] snapshot prune failed', delErr.message)
+}
+
+export async function listLedgerSnapshots(
+  householdId: string,
+): Promise<CloudSnapshotMeta[]> {
+  const sb = getSupabase()
+  if (!sb) return []
+
+  const { data, error } = await sb
+    .from('ledger_snapshots')
+    .select(
+      'id, created_at, label, device_label, transaction_count, import_count',
+    )
+    .eq('household_id', householdId)
+    .order('created_at', { ascending: false })
+    .limit(SNAPSHOT_KEEP)
+
+  if (error) {
+    console.warn('[cloud] list snapshots failed', error.message)
+    return []
+  }
+
+  return (data ?? []).map((row) => ({
+    id: String(row.id),
+    createdAt: String(row.created_at),
+    label: row.label ? String(row.label) : null,
+    deviceLabel: row.device_label ? String(row.device_label) : null,
+    transactionCount: Number(row.transaction_count),
+    importCount: Number(row.import_count),
+  }))
+}
+
+export async function restoreLedgerSnapshot(
+  householdId: string,
+  snapshotId: string,
+  options?: { pushAsCurrent?: boolean },
+): Promise<HouseholdBackup> {
+  const sb = getSupabase()
+  if (!sb) throw new Error('Supabase not configured')
+
+  const { data, error } = await sb
+    .from('ledger_snapshots')
+    .select('payload')
+    .eq('household_id', householdId)
+    .eq('id', snapshotId)
+    .single()
+
+  if (error || !data?.payload) {
+    throw new Error(error?.message ?? 'Snapshot not found')
+  }
+
+  const backup = parseBackup(data.payload)
+  applyCloudBackupToLocal(backup)
+  markCloudDownloadedNow()
+
+  if (options?.pushAsCurrent) {
+    await pushCloudBackup(householdId, backup)
+    await saveLedgerSnapshot(
+      householdId,
+      backup,
+      `Restored · ${formatSnapshotLabel(backup)}`,
+    )
+    markCloudSavedNow()
+  }
+
+  return backup
+}
+
+/** Upload everything on this device to the cloud. */
 export async function migrateDeviceToCloud(
   householdId: string,
   backup?: HouseholdBackup,
+  options?: { snapshot?: boolean },
 ): Promise<{ filesUploaded: number }> {
   const payload =
     backup ??
@@ -622,6 +798,11 @@ export async function migrateDeviceToCloud(
     householdId,
     payload.imports,
   )
+  // Default: snapshot on explicit migrate; callers pass snapshot:false for auto-save.
+  if (options?.snapshot !== false) {
+    await saveLedgerSnapshot(householdId, payload)
+  }
+  markCloudSavedNow()
   return { filesUploaded }
 }
 
@@ -630,6 +811,7 @@ export async function pullCloudToDevice(householdId: string): Promise<HouseholdB
   const backup = await fetchCloudBackup(householdId)
   if (!backup) return null
   applyCloudBackupToLocal(backup)
+  markCloudDownloadedNow()
   return backup
 }
 

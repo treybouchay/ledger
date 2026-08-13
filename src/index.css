@@ -361,6 +361,62 @@ select {
   margin-bottom: 0.85rem;
 }
 
+.cloud-sync-meta {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+}
+
+.cloud-sync-meta strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.cloud-snapshot-history {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.cloud-snapshot-history h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.cloud-snapshot-history > p {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
+.cloud-snapshot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.cloud-snapshot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface, #fff) 88%, #e8eee9);
+}
+
+.cloud-snapshot-detail {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
 .callout {
   display: flex;
   flex-wrap: wrap;

@@ -132,6 +132,22 @@ create table if not exists public.gear_state (
   updated_at timestamptz not null default now()
 );
 
+-- Point-in-time ledger JSON after explicit Save / Upload (keep last 10 in app).
+create table if not exists public.ledger_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references public.households (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  created_by uuid references auth.users (id) on delete set null,
+  label text,
+  device_label text,
+  transaction_count integer not null default 0,
+  import_count integer not null default 0,
+  payload jsonb not null
+);
+
+create index if not exists ledger_snapshots_household_created_idx
+  on public.ledger_snapshots (household_id, created_at desc);
+
 -- ---------------------------------------------------------------------------
 -- RLS helper
 -- ---------------------------------------------------------------------------
@@ -195,6 +211,7 @@ alter table public.budget_overrides enable row level security;
 alter table public.income_overrides enable row level security;
 alter table public.learned_rules enable row level security;
 alter table public.gear_state enable row level security;
+alter table public.ledger_snapshots enable row level security;
 
 -- Households: members can read; authenticated users can create
 create policy households_select on public.households
@@ -240,6 +257,10 @@ create policy learned_rules_all on public.learned_rules
   with check (household_id in (select public.user_household_ids()));
 
 create policy gear_state_all on public.gear_state
+  for all using (household_id in (select public.user_household_ids()))
+  with check (household_id in (select public.user_household_ids()));
+
+create policy ledger_snapshots_all on public.ledger_snapshots
   for all using (household_id in (select public.user_household_ids()))
   with check (household_id in (select public.user_household_ids()));
 
