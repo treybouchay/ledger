@@ -40,6 +40,31 @@ function idbReq<T>(req: IDBRequest<T>): Promise<T> {
   })
 }
 
+/**
+ * One import can hold several screenshots. Part 0 keeps the bare import id so
+ * older single-file uploads (and their cloud storage paths) keep working.
+ */
+export function statementFilePartKey(importId: string, index: number): string {
+  return index <= 0 ? importId : `${importId}__p${index}`
+}
+
+/**
+ * Names of every file behind an import, in upload order. Falls back to the
+ * ` + `-joined label so multi-screenshot imports still browse after a cloud
+ * pull, which only carries the joined file name.
+ */
+export function statementFileNames(
+  fileName: string,
+  storedFileNames?: string[],
+): string[] {
+  if (storedFileNames && storedFileNames.length > 0) return storedFileNames
+  const joined = fileName
+    .split(' + ')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  return joined.length > 1 ? joined : [fileName]
+}
+
 export async function saveStatementFile(
   importId: string,
   file: File | Blob,
@@ -80,6 +105,21 @@ export async function saveStatementFile(
   return record
 }
 
+/** Save every uploaded file for one import (screenshot batches keep all pages). */
+export async function saveStatementFileParts(
+  importId: string,
+  files: File[],
+): Promise<StoredStatementFile[]> {
+  const saved: StoredStatementFile[] = []
+  for (let i = 0; i < files.length; i += 1) {
+    const file = files[i]
+    saved.push(
+      await saveStatementFile(statementFilePartKey(importId, i), file, file.name),
+    )
+  }
+  return saved
+}
+
 export async function loadStatementFile(
   importId: string,
 ): Promise<StoredStatementFile | null> {
@@ -97,11 +137,19 @@ export async function loadStatementFile(
   }
 }
 
+/** Removes the import's file and every extra screenshot part it saved. */
 export async function deleteStatementFile(importId: string): Promise<void> {
   const db = await openDb()
   try {
     const tx = db.transaction(STORE, 'readwrite')
-    await idbReq(tx.objectStore(STORE).delete(importId))
+    const store = tx.objectStore(STORE)
+    const keys = await idbReq(store.getAllKeys() as IDBRequest<IDBValidKey[]>)
+    const prefix = `${importId}__p`
+    for (const key of keys) {
+      if (typeof key !== 'string') continue
+      if (key !== importId && !key.startsWith(prefix)) continue
+      await idbReq(store.delete(key))
+    }
   } finally {
     db.close()
   }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { PEOPLE } from '../data/seed'
 import { CategoryPicker } from './CategoryPicker'
 import {
@@ -34,6 +34,8 @@ export interface ImportCommitMeta {
   personId: PersonId
   /** Original upload — persisted to IndexedDB on commit for View statement. */
   file: File | null
+  /** Every uploaded file (a screenshot batch keeps all pages browsable). */
+  files?: File[]
   /** Rows in the review queue (parsed). */
   totalParsed: number
   /** Unchecked rows marked duplicate. */
@@ -81,6 +83,10 @@ export function ImportReviewQueue({
     'statement' | 'screenshot' | undefined
   >()
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
+  /** Which uploaded screenshot is open in the full-size viewer. */
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
+  /** Review rows narrowed to one screenshot (`all` shows every source). */
+  const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [pendingUpload, setPendingUpload] = useState<
     | {
         kind: 'statement'
@@ -94,16 +100,38 @@ export function ImportReviewQueue({
     | null
   >(null)
 
+  useEffect(() => {
+    if (viewerIndex == null) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setViewerIndex(null)
+      if (e.key === 'ArrowRight') stepViewer(1)
+      if (e.key === 'ArrowLeft') stepViewer(-1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewerIndex, previewUrls.length])
+
   const included = useMemo(
     () => drafts.filter((d) => d.included),
     [drafts],
   )
   const needsReview = useMemo(() => countNeedsReview(drafts), [drafts])
   const duplicateCount = useMemo(() => countDuplicates(drafts), [drafts])
-  const visibleDrafts = useMemo(
-    () => filterByNeedsLook(drafts, needsLookFilter),
-    [drafts, needsLookFilter],
-  )
+  const visibleDrafts = useMemo(() => {
+    const byLook = filterByNeedsLook(drafts, needsLookFilter)
+    if (sourceFilter === 'all') return byLook
+    return byLook.filter((d) => d.sourceLabel === sourceFilter)
+  }, [drafts, needsLookFilter, sourceFilter])
+  /** Parsed-row count per uploaded screenshot, for thumbnail captions. */
+  const rowsPerSource = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of drafts) {
+      if (!row.sourceLabel) continue
+      counts.set(row.sourceLabel, (counts.get(row.sourceLabel) ?? 0) + 1)
+    }
+    return counts
+  }, [drafts])
   const importTotal = useMemo(
     () =>
       included.reduce(
@@ -160,6 +188,14 @@ export function ImportReviewQueue({
 
   function revokePreviewUrls(urls: string[]) {
     for (const url of urls) URL.revokeObjectURL(url)
+  }
+
+  function stepViewer(delta: number) {
+    setViewerIndex((current) => {
+      if (current == null || previewUrls.length === 0) return current
+      const next = (current + delta + previewUrls.length) % previewUrls.length
+      return next
+    })
   }
 
   function labelForFiles(files: File[]): string {
@@ -232,6 +268,8 @@ export function ImportReviewQueue({
       setSourceKind(kind ?? 'statement')
       setWarning(parseWarning)
       setNeedsLookFilter('all')
+      setSourceFilter('all')
+      setViewerIndex(null)
 
       const nextPerson = detectedPersonId ?? personId
       const nextAccount = resolveAccountForPerson(
@@ -354,6 +392,8 @@ export function ImportReviewQueue({
             : undefined,
       )
       setNeedsLookFilter('all')
+      setSourceFilter('all')
+      setViewerIndex(null)
 
       if (append) {
         rebuildDrafts(nextRows, personId, defaultAccountId)
@@ -528,6 +568,8 @@ export function ImportReviewQueue({
     setWarning(undefined)
     setError(null)
     setNeedsLookFilter('all')
+    setSourceFilter('all')
+    setViewerIndex(null)
     setDetectionNote(undefined)
     setPersonSource('manual')
     setPreviewUrls((prev) => {
@@ -594,6 +636,7 @@ export function ImportReviewQueue({
       fileName: name,
       personId,
       file,
+      files: sourceFiles.length > 0 ? sourceFiles : file ? [file] : [],
       totalParsed: drafts.length,
       skippedDuplicates,
       skippedOther,
@@ -797,21 +840,150 @@ export function ImportReviewQueue({
         {warning ? <p className="hint">{warning}</p> : null}
 
         {previewUrls.length > 0 ? (
+          <div className="screenshot-strip">
+            <div className="screenshot-strip-head">
+              <h4>
+                {previewUrls.length} uploaded{' '}
+                {previewUrls.length === 1 ? 'image' : 'images'}
+              </h4>
+              <p className="hint">
+                Tap one to view it full size — arrows move between screenshots.
+              </p>
+            </div>
+            <div className="screenshot-strip-grid">
+              {previewUrls.map((url, i) => {
+                const name = sourceFiles[i]?.name ?? `screenshot ${i + 1}`
+                const count = rowsPerSource.get(name) ?? 0
+                return (
+                  <button
+                    key={url}
+                    type="button"
+                    className={`screenshot-thumb${
+                      sourceFilter === name ? ' is-filtered' : ''
+                    }`}
+                    onClick={() => setViewerIndex(i)}
+                    title={name}
+                  >
+                    <img src={url} alt={`Uploaded ${name}`} />
+                    <span className="screenshot-thumb-meta">
+                      <strong>{i + 1}</strong>
+                      <span>
+                        {count} charge{count === 1 ? '' : 's'}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            {previewUrls.length > 1 && drafts.length > 0 ? (
+              <div
+                className="screenshot-strip-filters"
+                role="group"
+                aria-label="Filter review rows by screenshot"
+              >
+                <button
+                  type="button"
+                  className={`review-filter-chip${
+                    sourceFilter === 'all' ? ' active' : ''
+                  }`}
+                  aria-pressed={sourceFilter === 'all'}
+                  onClick={() => setSourceFilter('all')}
+                >
+                  All ({drafts.length})
+                </button>
+                {sourceFiles.map((file, i) => (
+                  <button
+                    key={`${file.name}-${i}`}
+                    type="button"
+                    className={`review-filter-chip${
+                      sourceFilter === file.name ? ' active' : ''
+                    }`}
+                    aria-pressed={sourceFilter === file.name}
+                    onClick={() =>
+                      setSourceFilter((prev) =>
+                        prev === file.name ? 'all' : file.name,
+                      )
+                    }
+                  >
+                    #{i + 1} ({rowsPerSource.get(file.name) ?? 0})
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {viewerIndex != null && previewUrls[viewerIndex] ? (
           <div
-            className={
-              previewUrls.length > 1
-                ? 'screenshot-preview-grid'
-                : 'screenshot-preview'
-            }
+            className="cash-link-modal-backdrop"
+            role="presentation"
+            onClick={() => setViewerIndex(null)}
           >
-            {previewUrls.map((url, i) => (
-              <div key={url} className="screenshot-preview">
+            <div
+              className="cash-link-modal screenshot-viewer"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Uploaded screenshot"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="cash-link-modal-header">
+                <div>
+                  <h3>
+                    Screenshot {viewerIndex + 1} of {previewUrls.length}
+                  </h3>
+                  <p>
+                    {sourceFiles[viewerIndex]?.name ?? 'screenshot'}
+                    {' · '}
+                    {rowsPerSource.get(
+                      sourceFiles[viewerIndex]?.name ?? '',
+                    ) ?? 0}{' '}
+                    charges read
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setViewerIndex(null)}
+                >
+                  Close
+                </button>
+              </div>
+              <div className="screenshot-viewer-image">
                 <img
-                  src={url}
-                  alt={`Uploaded ${sourceFiles[i]?.name || `screenshot ${i + 1}`}`}
+                  src={previewUrls[viewerIndex]}
+                  alt={`Uploaded ${sourceFiles[viewerIndex]?.name ?? 'screenshot'}`}
                 />
               </div>
-            ))}
+              <div className="cash-link-modal-actions screenshot-viewer-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={previewUrls.length < 2}
+                  onClick={() => stepViewer(-1)}
+                >
+                  ‹ Previous
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    const name = sourceFiles[viewerIndex]?.name
+                    if (name) setSourceFilter(name)
+                    setViewerIndex(null)
+                  }}
+                >
+                  Review only this one
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={previewUrls.length < 2}
+                  onClick={() => stepViewer(1)}
+                >
+                  Next ›
+                </button>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -925,9 +1097,10 @@ export function ImportReviewQueue({
                       : null}
                   </button>
                 ))}
-                {needsLookFilter !== 'all' ? (
+                {needsLookFilter !== 'all' || sourceFilter !== 'all' ? (
                   <span className="review-filter-meta">
                     Showing {visibleDrafts.length} of {drafts.length}
+                    {sourceFilter !== 'all' ? ` · ${sourceFilter}` : ''}
                   </span>
                 ) : null}
               </div>

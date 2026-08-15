@@ -314,6 +314,33 @@ OPENAI CHATGPT SUBSCR SAN FRANCISCO $32.61
   )
 }
 
+// Host-style payees on the amount row (OLDNAVY.COM) used to read as URL
+// subtitles, so every Old Navy return was dropped instead of imported.
+const amexHostPayeeReturns = `
+SimplyCash® Preferred Card
+11 Aug
+AMZN MKTP CA*5H4OH9050
+866-216-1072 $95.01
+GOOD EARTH COFFEEHOUSE OSHAWA $4.07
+OLDNAVY.COM 800-427-7895 -$41.40
+OLDNAVY.COM 800-427-7895 $27.11
+OLDNAVY.COM 800-427-7895 -$23.72
+OLDNAVY.COM 800-427-7895 $22.59
+`
+
+{
+  const rows = parseScreenshotText(amexHostPayeeReturns)
+  const oldNavy = rows.filter((r) => /oldnavy/i.test(r.merchant))
+  assert.equal(oldNavy.length, 4, `expected 4 Old Navy rows, got ${oldNavy.length}`)
+  // One sibling keeping the minus promotes the washed-out greens too.
+  assert.ok(oldNavy.every((r) => r.isRefund))
+  assert.deepEqual(
+    oldNavy.map((r) => r.amount).sort((a, b) => a - b),
+    [22.59, 23.72, 27.11, 41.4],
+  )
+  assert.ok(rows.some((r) => /amzn/i.test(r.merchant) && !r.isRefund))
+}
+
 // Phone-only subtitle under the payee must still allow Credit detection.
 const phoneOnlySubtitleCredit = `
 SimplyCash Preferred Card

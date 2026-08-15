@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   isImageMime,
   isPdfMime,
   isTextLikeMime,
+  statementFileNames,
+  statementFilePartKey,
   type StoredStatementFile,
 } from '../lib/statementFiles'
 import { resolveStatementFile } from '../lib/cloudSync'
@@ -23,16 +25,34 @@ export function StatementFilePreview({
   importId,
   hasStoredFile,
   fileName,
+  storedFileNames,
   householdId,
 }: {
   importId: string
   /** From StatementImport — false/undefined for legacy uploads. */
   hasStoredFile?: boolean
   fileName: string
+  /** Every file in the upload — a screenshot batch is browsable page by page. */
+  storedFileNames?: string[]
   /** When signed in, fetch from cloud if not in this browser. */
   householdId?: string | null
 }) {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
+  const [index, setIndex] = useState(0)
+
+  const names = useMemo(
+    () => statementFileNames(fileName, storedFileNames),
+    [fileName, storedFileNames],
+  )
+  const total = names.length
+  const active = Math.min(index, total - 1)
+  // Part 0 was saved under the joined label before batches were split out.
+  const activeName = active === 0 ? fileName : names[active]
+  const partKey = statementFilePartKey(importId, active)
+
+  useEffect(() => {
+    setIndex(0)
+  }, [importId])
 
   useEffect(() => {
     let cancelled = false
@@ -45,7 +65,11 @@ export function StatementFilePreview({
       }
       setState({ status: 'loading' })
       try {
-        const file = await resolveStatementFile(importId, fileName, householdId ?? null)
+        const file = await resolveStatementFile(
+          partKey,
+          activeName,
+          householdId ?? null,
+        )
         if (cancelled) return
         if (!file) {
           setState({ status: 'missing' })
@@ -74,16 +98,21 @@ export function StatementFilePreview({
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [importId, hasStoredFile, fileName, householdId])
+  }, [partKey, activeName, hasStoredFile, householdId])
+
+  function step(delta: number) {
+    setIndex((current) => (current + delta + total) % total)
+  }
 
   return (
     <div className="statement-file-preview">
       <div className="statement-file-preview-header">
-        <h3>Original file</h3>
+        <h3>{total > 1 ? 'Original files' : 'Original file'}</h3>
         <p>
+          {total > 1 ? `${active + 1} of ${total} · ` : ''}
           {state.status === 'ready'
             ? `${state.file.fileName} · ${formatBytes(state.file.byteLength)}`
-            : fileName}
+            : names[active]}
         </p>
       </div>
 
@@ -93,7 +122,9 @@ export function StatementFilePreview({
 
       {state.status === 'missing' ? (
         <p className="statement-file-empty">
-          Original file wasn't saved for this upload.
+          {total > 1
+            ? `${names[active]} wasn't saved — only uploads from this version keep every screenshot.`
+            : "Original file wasn't saved for this upload."}
         </p>
       ) : null}
 
@@ -107,6 +138,30 @@ export function StatementFilePreview({
           url={state.url}
           textPreview={state.textPreview}
         />
+      ) : null}
+
+      {total > 1 ? (
+        <div className="statement-file-pager">
+          <button
+            type="button"
+            className="statement-file-arrow"
+            aria-label="Previous screenshot"
+            onClick={() => step(-1)}
+          >
+            ‹
+          </button>
+          <span className="statement-file-pager-count">
+            {active + 1} / {total}
+          </span>
+          <button
+            type="button"
+            className="statement-file-arrow"
+            aria-label="Next screenshot"
+            onClick={() => step(1)}
+          >
+            ›
+          </button>
+        </div>
       ) : null}
     </div>
   )
@@ -144,6 +199,9 @@ function PreviewBody({
           alt={`Statement scan: ${file.fileName}`}
           className="statement-file-img"
         />
+        <a className="statement-file-open" href={url} target="_blank" rel="noreferrer">
+          Open full size
+        </a>
       </div>
     )
   }

@@ -121,6 +121,7 @@ import {
   deleteStatementFile,
   loadStatementFile,
   saveStatementFile,
+  saveStatementFileParts,
   type StoredStatementFile,
 } from './lib/statementFiles'
 import {
@@ -930,6 +931,7 @@ export default function App() {
       fileName: string
       personId: PersonId
       file: File | null
+      files?: File[]
       totalParsed: number
       skippedDuplicates: number
       skippedOther: number
@@ -979,7 +981,24 @@ export default function App() {
 
     let hasStoredFile = false
     let mimeType: string | undefined
-    if (meta.file) {
+    let storedFileNames: string[] | undefined
+    const uploadedFiles =
+      meta.files && meta.files.length > 0
+        ? meta.files
+        : meta.file
+          ? [meta.file]
+          : []
+    if (uploadedFiles.length > 1) {
+      // Screenshot batch — keep every page so the viewer can browse them.
+      try {
+        const stored = await saveStatementFileParts(importId, uploadedFiles)
+        hasStoredFile = stored.length > 0
+        mimeType = stored[0]?.mimeType
+        storedFileNames = stored.map((s) => s.fileName)
+      } catch (err) {
+        console.error('[household-ledger] statement files save failed', err)
+      }
+    } else if (meta.file) {
       try {
         const stored = await saveStatementFile(
           importId,
@@ -1004,6 +1023,7 @@ export default function App() {
       netAmount,
       hasStoredFile,
       mimeType,
+      storedFileNames,
       sourceKind: meta.sourceKind,
     }
 
@@ -3895,6 +3915,7 @@ export default function App() {
                   importId={viewingImport.id}
                   hasStoredFile={viewingImport.hasStoredFile}
                   fileName={viewingImport.fileName}
+                  storedFileNames={viewingImport.storedFileNames}
                   householdId={cloudContext?.householdId ?? null}
                 />
                 <div className="statement-charges">

@@ -16,6 +16,8 @@ import { loadLearnedRules, saveLearnedRules, type LearnedRule } from './learnedR
 import {
   loadStatementFile,
   saveStatementFile,
+  statementFileNames,
+  statementFilePartKey,
   type StoredStatementFile,
 } from './statementFiles'
 import { loadImports, loadTransactions } from './storage'
@@ -514,23 +516,32 @@ export async function uploadStatementFilesFromDevice(
   let uploaded = 0
   for (const item of imports) {
     if (!item.hasStoredFile) continue
-    try {
-      const local = await loadStatementFile(item.id)
-      if (!local) continue
-      const path = storagePath(householdId, item.id, item.fileName)
-      const { error } = await sb.storage
-        .from(STATEMENT_FILES_BUCKET)
-        .upload(path, local.blob, {
-          upsert: true,
-          contentType: local.mimeType,
-        })
-      if (error) {
-        console.error('[cloud] upload statement file failed', item.id, error)
-        continue
+    const names = statementFileNames(item.fileName, item.storedFileNames)
+    for (let i = 0; i < names.length; i += 1) {
+      const partKey = statementFilePartKey(item.id, i)
+      try {
+        const local = await loadStatementFile(partKey)
+        if (!local) continue
+        // Part 0 keeps the legacy joined-label path so old uploads still resolve.
+        const path = storagePath(
+          householdId,
+          partKey,
+          i === 0 ? item.fileName : names[i],
+        )
+        const { error } = await sb.storage
+          .from(STATEMENT_FILES_BUCKET)
+          .upload(path, local.blob, {
+            upsert: true,
+            contentType: local.mimeType,
+          })
+        if (error) {
+          console.error('[cloud] upload statement file failed', partKey, error)
+          continue
+        }
+        uploaded += 1
+      } catch (err) {
+        console.error('[cloud] upload statement file error', partKey, err)
       }
-      uploaded += 1
-    } catch (err) {
-      console.error('[cloud] upload statement file error', item.id, err)
     }
   }
   return uploaded

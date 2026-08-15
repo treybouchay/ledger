@@ -689,6 +689,13 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
       merchant = findMerchantAbove(lines, i)
     }
 
+    // Last resort: the amount row named itself (`OLDNAVY.COM -$41.40`,
+    // `ZARA.COM $30`). Those read as host/city subtitles, which dropped the
+    // whole charge. Any payee text beats losing the row.
+    if (!isPlausibleMerchant(merchant ?? '') && isPlausibleMerchant(merchantOnLine)) {
+      merchant = merchantOnLine
+    }
+
     pendingMerchant = null
 
     if (!merchant || !isPlausibleMerchant(merchant)) continue
@@ -708,7 +715,7 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     })
   }
 
-  return promoteTwinAmznMktpRefunds(rows)
+  return promoteTwinMerchantRefunds(rows)
 }
 
 function localTodayYmd(): string {
@@ -720,18 +727,19 @@ function localTodayYmd(): string {
 }
 
 /**
- * OCR often keeps the minus on only one of two same-day AMZN MKTP CA credits.
- * If any twin is already a refund, promote the rest so both greens import.
+ * OCR often keeps the minus on only one of several same-day credits from the
+ * same payee (Amazon returns, Old Navy returns). If any sibling is already a
+ * refund, promote the rest so every green row imports as a return.
  */
-function promoteTwinAmznMktpRefunds(
+function promoteTwinMerchantRefunds(
   rows: ParsedStatementRow[],
 ): ParsedStatementRow[] {
   const byDate = new Map<string, ParsedStatementRow[]>()
   for (const row of rows) {
-    if (!/amzn\s*mktp/i.test(row.merchant)) continue
-    const list = byDate.get(row.date) ?? []
+    const key = `${row.date}|${refundTwinMerchantKey(row.merchant)}`
+    const list = byDate.get(key) ?? []
     list.push(row)
-    byDate.set(row.date, list)
+    byDate.set(key, list)
   }
   const promote = new Set<ParsedStatementRow>()
   for (const list of byDate.values()) {
@@ -744,6 +752,16 @@ function promoteTwinAmznMktpRefunds(
   }
   if (promote.size === 0) return rows
   return rows.map((r) => (promote.has(r) ? { ...r, isRefund: true } : r))
+}
+
+/** Group same-payee rows for twin-refund promotion (drops OCR order ids). */
+function refundTwinMerchantKey(merchant: string): string {
+  return cleanMerchantName(stripStoreNumbers(stripPhones(merchant)))
+    .toLowerCase()
+    .replace(/\*.*$/, '')
+    .replace(/\.(com|ca|net|org)\b/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim()
 }
 
 /** Walk up past store # / city subtitles to the real payee name. */

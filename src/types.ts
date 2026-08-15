@@ -181,6 +181,8 @@ export interface StatementImport {
   hasStoredFile?: boolean
   /** MIME of the stored file when hasStoredFile is true. */
   mimeType?: string
+  /** Every file behind this import, in upload order (screenshot batches). */
+  storedFileNames?: string[]
   /** How the charges were captured — screenshot uses on-device OCR. */
   sourceKind?: 'statement' | 'screenshot'
 }
