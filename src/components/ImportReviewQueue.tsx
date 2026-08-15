@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
 import { PEOPLE } from '../data/seed'
 import { CategoryPicker } from './CategoryPicker'
-import { accountLabel, accountOptionLabel } from '../lib/labels'
+import {
+  accountOptionLabel,
+  personOptionLabel,
+} from '../lib/labels'
 import { formatMoney } from '../lib/compute'
 import { confirmRemove } from '../lib/confirm'
 import {
@@ -78,6 +81,18 @@ export function ImportReviewQueue({
     'statement' | 'screenshot' | undefined
   >()
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
+  const [pendingUpload, setPendingUpload] = useState<
+    | {
+        kind: 'statement'
+        file: File
+      }
+    | {
+        kind: 'screenshot'
+        files: File[]
+        mode: 'replace' | 'append'
+      }
+    | null
+  >(null)
 
   const included = useMemo(
     () => drafts.filter((d) => d.included),
@@ -115,10 +130,9 @@ export function ImportReviewQueue({
     return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [included])
 
-  const personName =
-    PEOPLE.find((p) => p.id === personId)?.name ?? personId
+  const personDisplay = personOptionLabel(personId)
   const personAccounts = accountsForPerson(personId)
-  const accountName = accountLabel(defaultAccountId)
+  const accountDisplay = accountOptionLabel(defaultAccountId)
   const draftsPersonMismatch = useMemo(
     () => drafts.some((d) => d.personId !== personId),
     [drafts, personId],
@@ -153,6 +167,42 @@ export function ImportReviewQueue({
     if (files.length === 1) return files[0].name
     if (files.length <= 3) return files.map((f) => f.name).join(' + ')
     return `${files.length} screenshots (${files[0].name} + ${files.length - 1} more)`
+  }
+
+  function requestStatementUpload(file: File | null) {
+    if (!file) return
+    setPendingUpload({ kind: 'statement', file })
+  }
+
+  function requestScreenshotUpload(
+    fileList: FileList | File[] | null,
+    mode: 'replace' | 'append' = 'replace',
+  ) {
+    const incoming = Array.from(fileList ?? []).filter((f) =>
+      isImageMime(f.type, f.name),
+    )
+    if (incoming.length === 0) return
+    // Adding more screenshots to an open queue already chose person/account.
+    if (mode === 'append' && sourceKind === 'screenshot' && drafts.length > 0) {
+      void onScreenshotFiles(incoming, 'append')
+      return
+    }
+    setPendingUpload({ kind: 'screenshot', files: incoming, mode: 'replace' })
+  }
+
+  function cancelPendingUpload() {
+    setPendingUpload(null)
+  }
+
+  function confirmPendingUpload() {
+    if (!pendingUpload) return
+    const next = pendingUpload
+    setPendingUpload(null)
+    if (next.kind === 'statement') {
+      void onStatementFile(next.file)
+      return
+    }
+    void onScreenshotFiles(next.files, next.mode)
   }
 
   async function onStatementFile(file: File | null) {
@@ -512,7 +562,7 @@ export function ImportReviewQueue({
       const other = skippedOther - deposits
       if (other > 0) parts.push(`${other} unchecked`)
       const ok = confirmRemove(
-        `Import ${stamped.length} of ${drafts.length} rows?\n\n${excluded} will be skipped (${parts.join(', ') || 'unchecked'}).\n\nThese will post as ${personName}'s expenses (${accountName}).\n\nCancel to go back and use Include all, or re-check rows you want.`,
+        `Import ${stamped.length} of ${drafts.length} rows?\n\n${excluded} will be skipped (${parts.join(', ') || 'unchecked'}).\n\nThese will post as ${personDisplay} · ${accountDisplay}.\n\nCancel to go back and use Include all, or re-check rows you want.`,
       )
       if (!ok) return
     }
@@ -564,6 +614,97 @@ export function ImportReviewQueue({
         </div>
       </div>
 
+      {pendingUpload ? (
+        <div
+          className="cash-link-modal-backdrop"
+          role="presentation"
+          onClick={cancelPendingUpload}
+        >
+          <div
+            className="cash-link-modal upload-confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="upload-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cash-link-modal-header">
+              <div>
+                <h3 id="upload-confirm-title">Confirm upload</h3>
+                <p>
+                  {pendingUpload.kind === 'statement'
+                    ? `Statement: ${pendingUpload.file.name}`
+                    : pendingUpload.files.length === 1
+                      ? `Screenshot: ${pendingUpload.files[0].name}`
+                      : `${pendingUpload.files.length} screenshots`}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ghost"
+                onClick={cancelPendingUpload}
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="cash-link-modal-body upload-confirm-body">
+              <p className="hint">
+                Charges will post to this person and account. You can still
+                change them after OCR / parse if needed.
+              </p>
+              <label>
+                Profile
+                <select
+                  value={personId}
+                  onChange={(e) => changePerson(e.target.value as PersonId)}
+                >
+                  {PEOPLE.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {personOptionLabel(p.id)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Account
+                <select
+                  value={defaultAccountId}
+                  onChange={(e) =>
+                    changeDefaultAccount(e.target.value as AccountId)
+                  }
+                >
+                  {personAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {accountOptionLabel(a.id)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="upload-confirm-summary" role="status">
+                Uploading to <strong>{personDisplay}</strong>
+                {' · '}
+                <strong>{accountDisplay}</strong>
+              </p>
+            </div>
+            <div className="cash-link-modal-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={cancelPendingUpload}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={confirmPendingUpload}
+              >
+                Continue upload
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="upload-box">
         <p className="hint">
           Upload a bank PDF/CSV or phone screenshots of your activity list.
@@ -571,6 +712,53 @@ export function ImportReviewQueue({
           more after the first. Review every row (add or remove below).
           Already-logged charges show as duplicates and stay unchecked.
         </p>
+
+        <div className="import-source-grid">
+          <div className="import-source-card">
+            <h3>Account screenshots</h3>
+            <p className="hint">
+              Photos of your activity list — OCR reads charges on-device.
+              Select multiple, or add more after the first.
+            </p>
+            <label className="import-file-label">
+              {sourceKind === 'screenshot' && drafts.length > 0
+                ? 'Add screenshots'
+                : 'Choose screenshots'}
+              <input
+                type="file"
+                accept={SCREENSHOT_ACCEPT}
+                multiple
+                disabled={busy}
+                onChange={(e) => {
+                  const files = e.target.files
+                  requestScreenshotUpload(
+                    files,
+                    sourceKind === 'screenshot' && drafts.length > 0
+                      ? 'append'
+                      : 'replace',
+                  )
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          </div>
+          <div className="import-source-card">
+            <h3>Bank statement</h3>
+            <p className="hint">PDF or CSV from Amex, TD, or your bank export</p>
+            <label className="import-file-label">
+              Choose statement
+              <input
+                type="file"
+                accept={STATEMENT_ACCEPT}
+                disabled={busy}
+                onChange={(e) => {
+                  requestStatementUpload(e.target.files?.[0] ?? null)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          </div>
+        </div>
 
         <div className="upload-controls">
           <label>
@@ -581,7 +769,7 @@ export function ImportReviewQueue({
             >
               {PEOPLE.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {personOptionLabel(p.id)}
                 </option>
               ))}
             </select>
@@ -602,53 +790,6 @@ export function ImportReviewQueue({
               ))}
             </select>
           </label>
-        </div>
-
-        <div className="import-source-grid">
-          <div className="import-source-card">
-            <h3>Bank statement</h3>
-            <p className="hint">PDF or CSV from Amex, TD, or your bank export</p>
-            <label className="import-file-label">
-              Choose statement
-              <input
-                type="file"
-                accept={STATEMENT_ACCEPT}
-                disabled={busy}
-                onChange={(e) => {
-                  void onStatementFile(e.target.files?.[0] ?? null)
-                  e.target.value = ''
-                }}
-              />
-            </label>
-          </div>
-          <div className="import-source-card">
-            <h3>Account screenshots</h3>
-            <p className="hint">
-              Photos of your activity list — OCR reads charges on-device.
-              Select multiple, or add more after the first.
-            </p>
-            <label className="import-file-label">
-              {sourceKind === 'screenshot' && drafts.length > 0
-                ? 'Add screenshots'
-                : 'Choose screenshots'}
-              <input
-                type="file"
-                accept={SCREENSHOT_ACCEPT}
-                multiple
-                disabled={busy}
-                onChange={(e) => {
-                  const files = e.target.files
-                  void onScreenshotFiles(
-                    files,
-                    sourceKind === 'screenshot' && drafts.length > 0
-                      ? 'append'
-                      : 'replace',
-                  )
-                  e.target.value = ''
-                }}
-              />
-            </label>
-          </div>
         </div>
 
         {busy ? <p className="hint">{busyLabel}</p> : null}
@@ -695,9 +836,9 @@ export function ImportReviewQueue({
             >
               <p>
                 These charges will post to{' '}
-                <strong>{personName}</strong>
+                <strong>{personDisplay}</strong>
                 {' · '}
-                <strong>{accountName}</strong>
+                <strong>{accountDisplay}</strong>
               </p>
               <p className="statement-owner-meta">
                 {personSource === 'detected' && detectionNote
@@ -1030,7 +1171,7 @@ export function ImportReviewQueue({
                 disabled={included.length === 0}
                 onClick={commit}
               >
-                Import {included.length} as {personName}
+                Import {included.length} as {personDisplay}
               </button>
             </div>
           </>

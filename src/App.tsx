@@ -68,6 +68,7 @@ import {
   accountOptionLabel,
   categoryLabel,
   categoryOptionLabel,
+  personOptionLabel,
 } from './lib/labels'
 import { CategoryLineIcon } from './lib/categoryIcons'
 import {
@@ -253,6 +254,8 @@ export default function App() {
     label: string
   } | null>(null)
   const statementUndoTimerRef = useRef<number | null>(null)
+  const [importSuccess, setImportSuccess] = useState<string | null>(null)
+  const importSuccessTimerRef = useRef<number | null>(null)
   /** Skip persist-on-mount so Strict Mode / HMR never write before load settles. */
   const txPersistReadyRef = useRef(false)
   const importsPersistReadyRef = useRef(false)
@@ -483,6 +486,9 @@ export default function App() {
     return () => {
       if (statementUndoTimerRef.current != null) {
         window.clearTimeout(statementUndoTimerRef.current)
+      }
+      if (importSuccessTimerRef.current != null) {
+        window.clearTimeout(importSuccessTimerRef.current)
       }
     }
   }, [])
@@ -1043,19 +1049,27 @@ export default function App() {
       meta.file && !hasStoredFile
         ? 'original file could not be saved for preview'
         : null
-    setBackupMessage(
-      [
-        `Imported ${next.length} of ${meta.totalParsed} from ${meta.fileName}`,
-        skipParts.length > 0 ? skipParts.join(', ') : null,
-        monthParts ? `posted as ${monthParts}` : null,
-        primaryMonth
-          ? `switched to ${monthLabel(primaryMonth)} (most charges)`
-          : null,
-        fileNote,
-      ]
-        .filter(Boolean)
-        .join(' — ') + '.',
-    )
+    const successText = [
+      `Imported ${next.length} of ${meta.totalParsed} from ${meta.fileName}`,
+      `as ${personOptionLabel(meta.personId)}`,
+      skipParts.length > 0 ? skipParts.join(', ') : null,
+      monthParts ? `posted as ${monthParts}` : null,
+      primaryMonth
+        ? `switched to ${monthLabel(primaryMonth)} (most charges)`
+        : null,
+      fileNote,
+    ]
+      .filter(Boolean)
+      .join(' — ') + '.'
+    setBackupMessage(successText)
+    if (importSuccessTimerRef.current != null) {
+      window.clearTimeout(importSuccessTimerRef.current)
+    }
+    setImportSuccess(successText)
+    importSuccessTimerRef.current = window.setTimeout(() => {
+      setImportSuccess(null)
+      importSuccessTimerRef.current = null
+    }, 6500)
 
     if (primaryMonth) setMonthId(primaryMonth)
     setPersonFilter(meta.personId)
@@ -1783,6 +1797,25 @@ export default function App() {
               Dismiss
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {importSuccess ? (
+        <div className="import-success-toast" role="status">
+          <p>{importSuccess}</p>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              if (importSuccessTimerRef.current != null) {
+                window.clearTimeout(importSuccessTimerRef.current)
+                importSuccessTimerRef.current = null
+              }
+              setImportSuccess(null)
+            }}
+          >
+            Dismiss
+          </button>
         </div>
       ) : null}
 
@@ -3469,6 +3502,10 @@ export default function App() {
               </p>
             </div>
           </div>
+          <ImportReviewQueue
+            existingTransactions={transactions}
+            onCommit={commitReviewed}
+          />
           <UploadedStatements
             imports={imports}
                 onRemove={(importId) => {
@@ -3480,10 +3517,6 @@ export default function App() {
                 onViewStatement={openStatement}
                 liveCounts={importLiveCounts}
               />
-          <ImportReviewQueue
-            existingTransactions={transactions}
-            onCommit={commitReviewed}
-          />
         </div>
       )}
 

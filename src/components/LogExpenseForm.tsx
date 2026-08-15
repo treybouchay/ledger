@@ -6,7 +6,7 @@ import {
   accountsForPerson,
   resolveAccountForPerson,
 } from '../lib/customAccounts'
-import { accountOptionLabel } from '../lib/labels'
+import { accountOptionLabel, personOptionLabel } from '../lib/labels'
 import type { AccountId, CategoryId, PersonId, Transaction } from '../types'
 
 type EntryKind = 'expense' | 'refund' | 'cash_in'
@@ -150,7 +150,7 @@ export function LogExpenseForm({
           >
             {PEOPLE.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {personOptionLabel(p.id)}
               </option>
             ))}
           </select>

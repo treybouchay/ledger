@@ -23,7 +23,7 @@ export const ACCOUNTS: Account[] = [
   { id: 'amex', label: 'Amex', icon: '💙', owner: 'trevor' },
   { id: 'first_class', label: 'First Class', icon: '✨', owner: 'trevor' },
   { id: 'other', label: 'Other', icon: '📁', owner: 'trevor' },
-  { id: 'debit_kate', label: 'Debit', icon: '🏦', owner: 'kate' },
+  { id: 'debit_kate', label: 'Debit', icon: '🩷', owner: 'kate' },
 ]
 
 /** Categories mirrored from Expenses 2026 workbook. */
