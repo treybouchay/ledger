@@ -730,8 +730,18 @@ function buyCashTag(
   return effectiveListingStatus(move)
 }
 
-/** Display-only: asc matches sortCashMoves; desc reverses dated rows, undated last. */
-function sortCashMovesForDisplay(
+/** A typo'd date (2026-12-05 for Aug) silently jumps to the top of Desc. */
+function isFutureDated(date?: string | null): boolean {
+  const ymd = date?.slice(0, 10) ?? ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false
+  const now = new Date()
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`
+  return ymd > today
+}
+
+/** Display-only: asc matches sortCashMoves; desc reverses dated rows, undated last. */function sortCashMovesForDisplay(
   moves: GearCashMove[],
   order: CashDateSort,
 ): GearCashMove[] {
@@ -1915,6 +1925,25 @@ function CashLedger({
   const [sellDetailsOpen, setSellDetailsOpen] = useState(false)
   const [showBuys, setShowBuys] = useState(true)
   const [showSells, setShowSells] = useState(true)
+
+  function setCashListPane(pane: 'buys' | 'sells' | 'both') {
+    setShowBuys(pane === 'both' || pane === 'buys')
+    setShowSells(pane === 'both' || pane === 'sells')
+    // Jump the lists into view — on phone the compose form sits above a long
+    // Buys column, so switching to Sells should not leave you buried mid-scroll.
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById('cash-list-pane')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  const cashListPane: 'buys' | 'sells' | 'both' =
+    showBuys && !showSells
+      ? 'buys'
+      : !showBuys && showSells
+        ? 'sells'
+        : 'both'
   /** Newest first — date is part of the default description. */
   const [buyDateSort, setBuyDateSort] = useState<CashDateSort>('desc')
   const [sellDateSort, setSellDateSort] = useState<CashDateSort>('desc')
@@ -2879,6 +2908,14 @@ function CashLedger({
             tags={nonGear ? null : move.tags}
           />
           <div className="cash-move-meta">
+            {isFutureDated(move.date) ? (
+              <span
+                className="status-tag status-tag-future"
+                title="Dated in the future — that is why it sorts above today's rows in Desc"
+              >
+                Future date
+              </span>
+            ) : null}
             {nonGear ? (
               <span
                 className="status-tag status-tag-non-gear"
@@ -3629,6 +3666,56 @@ function CashLedger({
                 Clear filters
               </button>
             ) : null}
+          </div>
+          <div
+            id="cash-list-pane"
+            className="cash-list-pane"
+            role="group"
+            aria-label="Show buys, sells, or both"
+          >
+            {(
+              [
+                {
+                  id: 'buys' as const,
+                  label: 'Buys',
+                  count: filteredBuys.length,
+                  money: filteredMoneyOut,
+                  sign: 'out' as const,
+                },
+                {
+                  id: 'sells' as const,
+                  label: 'Sells',
+                  count: filteredSells.length,
+                  money: filteredMoneyIn,
+                  sign: 'in' as const,
+                },
+                {
+                  id: 'both' as const,
+                  label: 'Both',
+                  count: filteredBuys.length + filteredSells.length,
+                  money: null,
+                  sign: null,
+                },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={`cash-list-pane-btn${
+                  cashListPane === opt.id ? ' active' : ''
+                }`}
+                aria-pressed={cashListPane === opt.id}
+                onClick={() => setCashListPane(opt.id)}
+              >
+                <span className="cash-list-pane-label">{opt.label}</span>
+                <span className="cash-list-pane-meta">
+                  {opt.count}
+                  {opt.money != null
+                    ? ` · ${opt.sign === 'in' ? '+' : '−'}${formatMoney(opt.money)}`
+                    : ''}
+                </span>
+              </button>
+            ))}
           </div>
           <div
             className={`cash-split${!showBuys || !showSells ? ' single' : ''}`}

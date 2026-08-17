@@ -1072,6 +1072,27 @@ select {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.overview-quiet-strip.with-cash-in:not(.with-flip) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.overview-quiet-strip.with-flip.with-cash-in {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.overview-cash-ins {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.overview-cash-ins-lead {
+  margin: 0;
+}
+
+.overview-cash-ins .empty-guide-actions {
+  margin-top: 0.15rem;
+}
+
 .overview-quiet-strip > div {
   padding: 0.65rem 0.85rem;
   border-radius: 12px;
@@ -2393,7 +2414,9 @@ select {
 }
 
 @media (max-width: 900px) {
-  .overview-quiet-strip.with-flip {
+  .overview-quiet-strip.with-flip,
+  .overview-quiet-strip.with-cash-in,
+  .overview-quiet-strip.with-flip.with-cash-in {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -2403,7 +2426,9 @@ select {
   .overview-meta,
   .insight-hero,
   .overview-quiet-strip,
-  .overview-quiet-strip.with-flip {
+  .overview-quiet-strip.with-flip,
+  .overview-quiet-strip.with-cash-in,
+  .overview-quiet-strip.with-flip.with-cash-in {
     grid-template-columns: 1fr;
   }
 
@@ -3805,6 +3830,76 @@ select {
   align-items: start;
 }
 
+.cash-list-pane {
+  /* Desktop shows Buys and Sells side by side — the switcher is mobile-only. */
+  display: none;
+  position: sticky;
+  top: 0.35rem;
+  z-index: 6;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin: 0 0 0.85rem;
+  padding: 0.35rem;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel-solid, #fff) 92%, var(--accent-soft));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent),
+    0 8px 18px color-mix(in srgb, var(--ink) 6%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+@media (max-width: 900px) {
+  .cash-list-pane {
+    display: grid;
+  }
+}
+
+.cash-list-pane-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  border-radius: 10px;
+  padding: 0.55rem 0.55rem 0.5rem;
+  cursor: pointer;
+  display: grid;
+  gap: 0.1rem;
+  text-align: center;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.cash-list-pane-btn:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, #fff 70%, transparent);
+}
+
+.cash-list-pane-btn.active {
+  color: var(--ink);
+  background: #fff;
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.cash-list-pane-label {
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.cash-list-pane-meta {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+.cash-list-pane-btn.active .cash-list-pane-meta {
+  color: color-mix(in srgb, var(--ink-muted) 70%, var(--accent));
+}
+
 .cash-buys-header-controls {
   display: flex;
   flex-direction: column;
@@ -4486,6 +4581,12 @@ select {
   color: #7a5c32;
   background: color-mix(in srgb, #e8d9c4 70%, #fff);
   border-color: color-mix(in srgb, #9a7b4f 35%, transparent);
+}
+
+.status-tag-future {
+  color: #8a4b2a;
+  background: color-mix(in srgb, #f6d9c6 70%, #fff);
+  border-color: color-mix(in srgb, #c2703f 40%, transparent);
 }
 
 .status-tag-manual {
@@ -6117,6 +6218,12 @@ tr:last-child td {
   padding: 0 1.15rem 1.15rem;
   display: grid;
   gap: 1rem;
+}
+
+/* Log entry has no panel header above the form — keep the card off the chips. */
+.log-entry-panel .upload-box {
+  padding-top: 1.45rem;
+  gap: 1.15rem;
 }
 
 .statement-owner-banner {

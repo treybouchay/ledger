@@ -239,6 +239,7 @@ export default function App() {
   const [overviewOpen, setOverviewOpen] = useState({
     payflow: false,
     people: false,
+    cashIns: true,
     accounts: true,
     statements: false,
   })
@@ -634,6 +635,25 @@ export default function App() {
     [transactions, monthId],
   )
 
+  /** Manual / imported “Cash in” rows — not gear sells. */
+  const monthLedgerCashIns = useMemo(() => {
+    return sortTransactionsMostRecent(
+      monthTransactions.filter(
+        (t) =>
+          Boolean(t.isCashIn) &&
+          !t.isRefund &&
+          (personFilter === 'all' || t.personId === personFilter),
+      ),
+    )
+  }, [monthTransactions, personFilter])
+  const monthLedgerCashInTotal = useMemo(
+    () =>
+      Math.round(
+        monthLedgerCashIns.reduce((sum, t) => sum + t.amount, 0) * 100,
+      ) / 100,
+    [monthLedgerCashIns],
+  )
+
   const monthImports = useMemo(
     () => imports.filter((item) => item.monthIds.includes(monthId)),
     [imports, monthId],
@@ -891,6 +911,7 @@ export default function App() {
     monthFlipProfit.groupCount > 0 ||
     monthFlipProfit.sellCount > 0 ||
     monthCashMade.nonGear > 0
+  const showLedgerCashIn = monthLedgerCashIns.length > 0
   // Hypothetical: net cash made (gross sold − non-gear spends) infused into variable budget.
   const variableBudgetIfCashMade =
     Math.round((insightVariableBudget + monthCashMade.net) * 100) / 100
@@ -2317,7 +2338,13 @@ export default function App() {
           </section>
 
           <div
-            className={`overview-quiet-strip${showFlipProfit ? ' with-flip' : ''}`}
+            className={[
+              'overview-quiet-strip',
+              showFlipProfit ? 'with-flip' : '',
+              showLedgerCashIn ? 'with-cash-in' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
             aria-label="Income context"
           >
             <div>
@@ -2334,6 +2361,19 @@ export default function App() {
                 <p className="stat-sub">Monthly take-home used in this view</p>
               )}
             </div>
+            {showLedgerCashIn ? (
+              <div>
+                <span className="stat-label">Cash added</span>
+                <strong className="good">
+                  +{formatMoney(monthLedgerCashInTotal)}
+                </strong>
+                <p className="stat-sub">
+                  {monthLedgerCashIns.length} ledger cash-in
+                  {monthLedgerCashIns.length === 1 ? '' : 's'} this month · not
+                  gear
+                </p>
+              </div>
+            ) : null}
             {showFlipProfit ? (
               <div>
                 <span className="stat-label">Cash infusion · Gear flips</span>
@@ -2691,6 +2731,66 @@ export default function App() {
               <PersonCard name="Trevor" totals={trevor} />
               <PersonCard name="Kate" totals={kate} />
             </div>
+          </OverviewSection>
+
+          <OverviewSection
+            id="overview-cash-ins"
+            title="Cash added"
+            summary={
+              showLedgerCashIn
+                ? `+${formatMoney(monthLedgerCashInTotal)} · ${monthLedgerCashIns.length} ${
+                    monthLedgerCashIns.length === 1 ? 'entry' : 'entries'
+                  }`
+                : 'No ledger cash-ins this month'
+            }
+            open={overviewOpen.cashIns}
+            onToggle={() => toggleOverview('cashIns')}
+          >
+            {!showLedgerCashIn ? (
+              <div className="empty-guide embedded">
+                <p>
+                  Cash in from Log expense (ATM, e-transfer, gifts) lands here —
+                  separate from gear sells. It cuts net spend for the month and
+                  shows on your accounts, but it is not gear cash made.
+                </p>
+                <div className="empty-guide-actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setTab('log')}
+                  >
+                    Log cash in
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="overview-cash-ins">
+                <p className="stat-sub overview-cash-ins-lead">
+                  Ledger cash-ins only — not gear sells or non-gear spends from
+                  Gear flips.
+                </p>
+                <RecentChargeList
+                  charges={monthLedgerCashIns}
+                  showPerson={personFilter === 'all'}
+                />
+                <div className="empty-guide-actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setTab('log')}
+                  >
+                    Log another cash in
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setTab('transactions')}
+                  >
+                    Open transactions
+                  </button>
+                </div>
+              </div>
+            )}
           </OverviewSection>
 
           <OverviewSection
@@ -3503,7 +3603,7 @@ export default function App() {
               </p>
             </div>
           </div>
-          <section className="panel">
+          <section className="panel log-entry-panel">
             <div className="upload-box">
               <LogExpenseForm onSave={saveManual} />
             </div>
@@ -4643,6 +4743,14 @@ function PersonCard({
           <dt>Fixed bills</dt>
           <dd>{formatMoney(totals.fixedBudget)}</dd>
         </div>
+        {(totals.cashIns ?? 0) > 0 ? (
+          <div>
+            <dt>Cash in</dt>
+            <dd className="leftover good">
+              +{formatMoney(totals.cashIns ?? 0)}
+            </dd>
+          </div>
+        ) : null}
         <div>
           <dt>Variable budget left</dt>
           <dd
