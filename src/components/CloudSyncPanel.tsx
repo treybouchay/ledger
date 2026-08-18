@@ -17,6 +17,7 @@ import {
   type CloudSnapshotMeta,
 } from '../lib/cloudSync'
 import { SyncCloudArrowIcon, SyncSourceIcon } from '../lib/categoryIcons'
+import { personOptionLabel } from '../lib/labels'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase'
 import type { HouseholdBackup } from '../lib/backup'
 
@@ -35,6 +36,42 @@ function formatSyncTime(iso: string | null): string {
 
 const RECENT_SNAPSHOT_COUNT = 3
 
+function snapshotUploaderLabel(snap: CloudSnapshotMeta): string | null {
+  if (snap.personId && snap.createdByEmail) {
+    return `${personOptionLabel(snap.personId)} · ${snap.createdByEmail}`
+  }
+  if (snap.personId) return personOptionLabel(snap.personId)
+  if (snap.createdByEmail) return snap.createdByEmail
+  return null
+}
+
+function snapshotCountLabel(snap: CloudSnapshotMeta): string {
+  return `${snap.transactionCount} tx · ${snap.importCount} imports`
+}
+
+function LastUploadBanner({ snap }: { snap: CloudSnapshotMeta }) {
+  const who = snap.personId ? personOptionLabel(snap.personId) : null
+  const account = snap.createdByEmail
+  const source = syncSourceFromDeviceLabel(snap.deviceLabel)
+  return (
+    <p className="cloud-last-upload" role="status">
+      Last upload:{' '}
+      <strong>{who ?? account ?? 'Unknown'}</strong>
+      {who && account ? (
+        <>
+          {' '}
+          to <strong>{account}</strong>
+        </>
+      ) : null}
+      <span className="cloud-last-upload-meta">
+        {source === 'phone' ? 'Phone' : 'Desktop'}
+        {snap.deviceLabel ? ` · ${snap.deviceLabel}` : ''}
+        {` · ${formatSyncTime(snap.createdAt)}`}
+      </span>
+    </p>
+  )
+}
+
 function SnapshotHistoryList({
   snapshots,
   busy,
@@ -49,6 +86,7 @@ function SnapshotHistoryList({
       {snapshots.map((snap) => {
         const source = syncSourceFromDeviceLabel(snap.deviceLabel)
         const deviceName = snap.deviceLabel ?? 'Device'
+        const uploader = snapshotUploaderLabel(snap)
         return (
           <li key={snap.id} className="cloud-snapshot-row">
             <div className="cloud-snapshot-meta">
@@ -64,11 +102,13 @@ function SnapshotHistoryList({
                   {source === 'phone' ? 'Phone' : 'Desktop'}
                 </span>
               </span>
+              {uploader ? (
+                <span className="cloud-snapshot-who">{uploader}</span>
+              ) : null}
               <strong>{formatSyncTime(snap.createdAt)}</strong>
               <span className="cloud-snapshot-detail">
                 {deviceName}
-                {snap.label ? ` · ${snap.label}` : ''}
-                {` · ${snap.transactionCount} tx · ${snap.importCount} imports`}
+                {` · ${snapshotCountLabel(snap)}`}
               </span>
             </div>
             <div className="callout-actions">
@@ -436,13 +476,16 @@ export function CloudSyncPanel({
           {snapshots.length === 0 ? (
             <p className="backup-msg muted">No snapshots yet.</p>
           ) : (
-            <SnapshotHistoryList
-              snapshots={snapshots}
-              busy={busy}
-              onRestore={(snap, pushAsCurrent) =>
-                void handleRestoreSnapshot(snap, pushAsCurrent)
-              }
-            />
+            <>
+              <LastUploadBanner snap={snapshots[0]} />
+              <SnapshotHistoryList
+                snapshots={snapshots}
+                busy={busy}
+                onRestore={(snap, pushAsCurrent) =>
+                  void handleRestoreSnapshot(snap, pushAsCurrent)
+                }
+              />
+            </>
           )}
           {message ? <p className="backup-msg">{message}</p> : null}
         </div>
@@ -539,6 +582,7 @@ export function CloudSyncPanel({
             </p>
           ) : (
             <>
+              <LastUploadBanner snap={snapshots[0]} />
               <SnapshotHistoryList
                 snapshots={recentSnapshots}
                 busy={busy}

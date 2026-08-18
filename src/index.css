@@ -508,6 +508,30 @@ select {
   line-height: 1;
 }
 
+.cloud-snapshot-who {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.cloud-last-upload {
+  margin: 0 0 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-soft) 55%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.cloud-last-upload-meta {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
 .cloud-snapshot-detail {
   display: block;
   margin-top: 0.2rem;

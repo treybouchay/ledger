@@ -621,6 +621,10 @@ export interface CloudSnapshotMeta {
   deviceLabel: string | null
   transactionCount: number
   importCount: number
+  /** Signed-in person when this snapshot was saved (Trevor / Kate). */
+  personId: PersonId | null
+  /** Magic-link / login email that uploaded this snapshot. */
+  createdByEmail: string | null
 }
 
 export function getLastCloudSavedAt(): string | null {
@@ -683,6 +687,95 @@ function formatSnapshotLabel(backup: HouseholdBackup): string {
   return `${backup.transactions.length} tx · ${backup.imports.length} imports`
 }
 
+function asPersonId(value: unknown): PersonId | null {
+  return value === 'trevor' || value === 'kate' ? value : null
+}
+
+function personIdFromEmail(email: string | null | undefined): PersonId | null {
+  if (!email) return null
+  const local = email.split('@')[0] ?? ''
+  if (/kate/i.test(local) || /kate/i.test(email)) return 'kate'
+  if (/trevor|trey/i.test(local) || /trevor|trey/i.test(email)) return 'trevor'
+  return null
+}
+
+function snapshotIdentityLabel(
+  personId: PersonId | null,
+  email: string | null,
+): string | null {
+  const who = personId === 'kate' ? 'Kate' : personId === 'trevor' ? 'Trevor' : null
+  const parts = [who, email].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function parseIdentityFromLabel(label: string | null): {
+  personId: PersonId | null
+  email: string | null
+} {
+  if (!label) return { personId: null, email: null }
+  if (/\btx\b/i.test(label) && /\bimports?\b/i.test(label)) {
+    return { personId: null, email: null }
+  }
+  const email = label.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? null
+  const personId = asPersonId(
+    /kate/i.test(label) ? 'kate' : /trevor/i.test(label) ? 'trevor' : null,
+  ) ?? personIdFromEmail(email)
+  return { personId, email }
+}
+
+async function currentMemberIdentity(
+  householdId: string,
+  userId: string,
+  email: string | null,
+): Promise<{ personId: PersonId | null; email: string | null }> {
+  const sb = getSupabase()
+  let personId: PersonId | null = null
+  if (sb) {
+    const { data } = await sb
+      .from('household_members')
+      .select('person_id')
+      .eq('household_id', householdId)
+      .eq('user_id', userId)
+      .maybeSingle()
+    personId = asPersonId(data?.person_id)
+  }
+  if (!personId) personId = personIdFromEmail(email)
+  return { personId, email }
+}
+
+async function householdMemberIdentities(
+  householdId: string,
+): Promise<Map<string, { personId: PersonId | null; email: string | null }>> {
+  const map = new Map<string, { personId: PersonId | null; email: string | null }>()
+  const sb = getSupabase()
+  if (!sb) return map
+
+  const { data: rpc, error: rpcErr } = await sb.rpc('household_member_identities')
+  if (!rpcErr && Array.isArray(rpc)) {
+    for (const row of rpc as Record<string, unknown>[]) {
+      const userId = row.user_id ? String(row.user_id) : ''
+      if (!userId) continue
+      map.set(userId, {
+        personId: asPersonId(row.person_id) ?? personIdFromEmail(String(row.email ?? '')),
+        email: row.email ? String(row.email) : null,
+      })
+    }
+    return map
+  }
+
+  const { data } = await sb
+    .from('household_members')
+    .select('user_id, person_id')
+    .eq('household_id', householdId)
+  for (const row of data ?? []) {
+    map.set(String(row.user_id), {
+      personId: asPersonId(row.person_id),
+      email: null,
+    })
+  }
+  return map
+}
+
 /** Point-in-time snapshot after explicit Save / Upload (not every auto-save). */
 export async function saveLedgerSnapshot(
   householdId: string,
@@ -696,15 +789,36 @@ export async function saveLedgerSnapshot(
     data: { user },
   } = await sb.auth.getUser()
 
-  const { error } = await sb.from('ledger_snapshots').insert({
+  const identity = user
+    ? await currentMemberIdentity(
+        householdId,
+        user.id,
+        user.email ?? null,
+      )
+    : { personId: null, email: null }
+  const identityLabel = snapshotIdentityLabel(identity.personId, identity.email)
+  const labelParts = [identityLabel, label].filter(Boolean)
+  const row = {
     household_id: householdId,
     created_by: user?.id ?? null,
-    label: label ?? formatSnapshotLabel(backup),
+    label: labelParts.length > 0 ? labelParts.join(' · ') : formatSnapshotLabel(backup),
     device_label: shortDeviceLabel(),
     transaction_count: backup.transactions.length,
     import_count: backup.imports.length,
     payload: backup,
+  }
+
+  let { error } = await sb.from('ledger_snapshots').insert({
+    ...row,
+    created_by_email: identity.email,
+    person_id: identity.personId,
   })
+  if (
+    error &&
+    /created_by_email|person_id|schema cache|column/i.test(error.message)
+  ) {
+    ;({ error } = await sb.from('ledger_snapshots').insert(row))
+  }
 
   if (error) {
     console.warn('[cloud] snapshot save skipped', error.message)
@@ -734,28 +848,69 @@ export async function listLedgerSnapshots(
   const sb = getSupabase()
   if (!sb) return []
 
-  const { data, error } = await sb
+  const withIdentity =
+    'id, created_at, label, device_label, transaction_count, import_count, created_by, created_by_email, person_id'
+  const withoutExtra =
+    'id, created_at, label, device_label, transaction_count, import_count, created_by'
+
+  const first = await sb
     .from('ledger_snapshots')
-    .select(
-      'id, created_at, label, device_label, transaction_count, import_count',
-    )
+    .select(withIdentity)
     .eq('household_id', householdId)
     .order('created_at', { ascending: false })
     .limit(SNAPSHOT_KEEP)
+
+  let rows: Record<string, unknown>[] | null = null
+  let error = first.error
+  if (
+    error &&
+    /created_by_email|person_id|schema cache|column/i.test(error.message)
+  ) {
+    const fallback = await sb
+      .from('ledger_snapshots')
+      .select(withoutExtra)
+      .eq('household_id', householdId)
+      .order('created_at', { ascending: false })
+      .limit(SNAPSHOT_KEEP)
+    error = fallback.error
+    rows = (fallback.data ?? null) as Record<string, unknown>[] | null
+  } else {
+    rows = (first.data ?? null) as Record<string, unknown>[] | null
+  }
 
   if (error) {
     console.warn('[cloud] list snapshots failed', error.message)
     return []
   }
 
-  return (data ?? []).map((row) => ({
-    id: String(row.id),
-    createdAt: String(row.created_at),
-    label: row.label ? String(row.label) : null,
-    deviceLabel: row.device_label ? String(row.device_label) : null,
-    transactionCount: Number(row.transaction_count),
-    importCount: Number(row.import_count),
-  }))
+  const members = await householdMemberIdentities(householdId)
+
+  return (rows ?? []).map((row) => {
+    const createdBy = row.created_by ? String(row.created_by) : null
+    const fromMember = createdBy ? members.get(createdBy) : undefined
+    const fromLabel = parseIdentityFromLabel(
+      row.label ? String(row.label) : null,
+    )
+    const createdByEmail =
+      (row.created_by_email ? String(row.created_by_email) : null) ??
+      fromMember?.email ??
+      fromLabel.email
+    const personId =
+      asPersonId(row.person_id) ??
+      fromMember?.personId ??
+      fromLabel.personId ??
+      personIdFromEmail(createdByEmail)
+    return {
+      id: String(row.id),
+      createdAt: String(row.created_at),
+      label: row.label ? String(row.label) : null,
+      deviceLabel: row.device_label ? String(row.device_label) : null,
+      transactionCount: Number(row.transaction_count),
+      importCount: Number(row.import_count),
+      personId,
+      createdByEmail,
+    }
+  })
 }
 
 export async function restoreLedgerSnapshot(
