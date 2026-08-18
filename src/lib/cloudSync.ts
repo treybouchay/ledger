@@ -625,6 +625,10 @@ export interface CloudSnapshotMeta {
   personId: PersonId | null
   /** Magic-link / login email that uploaded this snapshot. */
   createdByEmail: string | null
+  /** Auth user who saved this snapshot, when known. */
+  createdBy: string | null
+  /** True when createdBy is the account signed in on this device. */
+  isCurrentUser: boolean
 }
 
 export function getLastCloudSavedAt(): string | null {
@@ -848,35 +852,17 @@ export async function listLedgerSnapshots(
   const sb = getSupabase()
   if (!sb) return []
 
-  const withIdentity =
-    'id, created_at, label, device_label, transaction_count, import_count, created_by, created_by_email, person_id'
-  const withoutExtra =
-    'id, created_at, label, device_label, transaction_count, import_count, created_by'
-
-  const first = await sb
+  // Only columns that exist on the original snapshots table. Extra identity
+  // columns are optional (add-snapshot-uploader.sql) — selecting them when
+  // missing can empty the whole history list.
+  const { data: rows, error } = await sb
     .from('ledger_snapshots')
-    .select(withIdentity)
+    .select(
+      'id, created_at, label, device_label, transaction_count, import_count, created_by',
+    )
     .eq('household_id', householdId)
     .order('created_at', { ascending: false })
     .limit(SNAPSHOT_KEEP)
-
-  let rows: Record<string, unknown>[] | null = null
-  let error = first.error
-  if (
-    error &&
-    /created_by_email|person_id|schema cache|column/i.test(error.message)
-  ) {
-    const fallback = await sb
-      .from('ledger_snapshots')
-      .select(withoutExtra)
-      .eq('household_id', householdId)
-      .order('created_at', { ascending: false })
-      .limit(SNAPSHOT_KEEP)
-    error = fallback.error
-    rows = (fallback.data ?? null) as Record<string, unknown>[] | null
-  } else {
-    rows = (first.data ?? null) as Record<string, unknown>[] | null
-  }
 
   if (error) {
     console.warn('[cloud] list snapshots failed', error.message)
@@ -884,31 +870,44 @@ export async function listLedgerSnapshots(
   }
 
   const members = await householdMemberIdentities(householdId)
+  const {
+    data: { user },
+  } = await sb.auth.getUser()
+  if (user?.id) {
+    const existing = members.get(user.id) ?? {
+      personId: null,
+      email: null,
+    }
+    members.set(user.id, {
+      personId:
+        existing.personId ?? personIdFromEmail(user.email ?? null),
+      email: existing.email ?? user.email ?? null,
+    })
+  }
 
   return (rows ?? []).map((row) => {
-    const createdBy = row.created_by ? String(row.created_by) : null
+    const record = row as Record<string, unknown>
+    const createdBy = record.created_by ? String(record.created_by) : null
     const fromMember = createdBy ? members.get(createdBy) : undefined
     const fromLabel = parseIdentityFromLabel(
-      row.label ? String(row.label) : null,
+      record.label ? String(record.label) : null,
     )
-    const createdByEmail =
-      (row.created_by_email ? String(row.created_by_email) : null) ??
-      fromMember?.email ??
-      fromLabel.email
+    const createdByEmail = fromMember?.email ?? fromLabel.email
     const personId =
-      asPersonId(row.person_id) ??
       fromMember?.personId ??
       fromLabel.personId ??
       personIdFromEmail(createdByEmail)
     return {
-      id: String(row.id),
-      createdAt: String(row.created_at),
-      label: row.label ? String(row.label) : null,
-      deviceLabel: row.device_label ? String(row.device_label) : null,
-      transactionCount: Number(row.transaction_count),
-      importCount: Number(row.import_count),
+      id: String(record.id),
+      createdAt: String(record.created_at),
+      label: record.label ? String(record.label) : null,
+      deviceLabel: record.device_label ? String(record.device_label) : null,
+      transactionCount: Number(record.transaction_count),
+      importCount: Number(record.import_count),
       personId,
       createdByEmail,
+      createdBy,
+      isCurrentUser: Boolean(user?.id && createdBy === user.id),
     }
   })
 }

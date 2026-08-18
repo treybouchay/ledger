@@ -37,10 +37,15 @@ function formatSyncTime(iso: string | null): string {
 const RECENT_SNAPSHOT_COUNT = 3
 
 function snapshotUploaderLabel(snap: CloudSnapshotMeta): string | null {
-  if (snap.personId && snap.createdByEmail) {
-    return `${personOptionLabel(snap.personId)} · ${snap.createdByEmail}`
-  }
-  if (snap.personId) return personOptionLabel(snap.personId)
+  const who = snap.personId
+    ? personOptionLabel(snap.personId)
+    : snap.isCurrentUser
+      ? 'You'
+      : snap.createdBy
+        ? 'Someone else'
+        : null
+  if (who && snap.createdByEmail) return `${who} · ${snap.createdByEmail}`
+  if (who) return who
   if (snap.createdByEmail) return snap.createdByEmail
   return null
 }
@@ -50,7 +55,13 @@ function snapshotCountLabel(snap: CloudSnapshotMeta): string {
 }
 
 function LastUploadBanner({ snap }: { snap: CloudSnapshotMeta }) {
-  const who = snap.personId ? personOptionLabel(snap.personId) : null
+  const who = snap.personId
+    ? personOptionLabel(snap.personId)
+    : snap.isCurrentUser
+      ? 'You'
+      : snap.createdBy
+        ? 'Someone else'
+        : null
   const account = snap.createdByEmail
   const source = syncSourceFromDeviceLabel(snap.deviceLabel)
   return (
@@ -102,9 +113,9 @@ function SnapshotHistoryList({
                   {source === 'phone' ? 'Phone' : 'Desktop'}
                 </span>
               </span>
-              {uploader ? (
-                <span className="cloud-snapshot-who">{uploader}</span>
-              ) : null}
+              <span className="cloud-snapshot-who">
+                {uploader ?? 'Unknown account'}
+              </span>
               <strong>{formatSyncTime(snap.createdAt)}</strong>
               <span className="cloud-snapshot-detail">
                 {deviceName}
