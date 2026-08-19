@@ -17,7 +17,7 @@ import {
   type CloudSnapshotMeta,
 } from '../lib/cloudSync'
 import { SyncCloudArrowIcon, SyncSourceIcon } from '../lib/categoryIcons'
-import { personOptionLabel } from '../lib/labels'
+import { personEmoji, personLabel } from '../lib/labels'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase'
 import type { HouseholdBackup } from '../lib/backup'
 
@@ -36,39 +36,47 @@ function formatSyncTime(iso: string | null): string {
 
 const RECENT_SNAPSHOT_COUNT = 3
 
-function snapshotUploaderLabel(snap: CloudSnapshotMeta): string | null {
-  const who = snap.personId
-    ? personOptionLabel(snap.personId)
+function snapshotUploaderLabel(snap: CloudSnapshotMeta): string {
+  const name = snap.personId
+    ? personLabel(snap.personId)
     : snap.isCurrentUser
       ? 'You'
       : snap.createdBy
         ? 'Someone else'
         : null
-  if (who && snap.createdByEmail) return `${who} · ${snap.createdByEmail}`
-  if (who) return who
+  if (name && snap.createdByEmail) return `${name} · ${snap.createdByEmail}`
+  if (name) return name
   if (snap.createdByEmail) return snap.createdByEmail
-  return null
+  return 'Unknown account'
 }
 
 function snapshotCountLabel(snap: CloudSnapshotMeta): string {
   return `${snap.transactionCount} tx · ${snap.importCount} imports`
 }
 
+function UploaderEmoji({ personId }: { personId: CloudSnapshotMeta['personId'] }) {
+  return (
+    <span
+      className="cloud-snapshot-emoji"
+      title={personId === 'kate' ? 'Kate' : personId === 'trevor' ? 'Trevor' : 'Unknown'}
+      aria-hidden
+    >
+      {personId ? personEmoji(personId) : '👤'}
+    </span>
+  )
+}
+
 function LastUploadBanner({ snap }: { snap: CloudSnapshotMeta }) {
-  const who = snap.personId
-    ? personOptionLabel(snap.personId)
-    : snap.isCurrentUser
-      ? 'You'
-      : snap.createdBy
-        ? 'Someone else'
-        : null
   const account = snap.createdByEmail
   const source = syncSourceFromDeviceLabel(snap.deviceLabel)
   return (
     <p className="cloud-last-upload" role="status">
       Last upload:{' '}
-      <strong>{who ?? account ?? 'Unknown'}</strong>
-      {who && account ? (
+      <UploaderEmoji personId={snap.personId} />{' '}
+      <strong>
+        {snap.personId ? personLabel(snap.personId) : snapshotUploaderLabel(snap)}
+      </strong>
+      {snap.personId && account ? (
         <>
           {' '}
           to <strong>{account}</strong>
@@ -114,7 +122,8 @@ function SnapshotHistoryList({
                 </span>
               </span>
               <span className="cloud-snapshot-who">
-                {uploader ?? 'Unknown account'}
+                <UploaderEmoji personId={snap.personId} />
+                {uploader}
               </span>
               <strong>{formatSyncTime(snap.createdAt)}</strong>
               <span className="cloud-snapshot-detail">

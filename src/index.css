@@ -509,10 +509,22 @@ select {
 }
 
 .cloud-snapshot-who {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--ink);
+}
+
+.cloud-snapshot-emoji {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.cloud-last-upload .cloud-snapshot-emoji {
+  font-size: 1.45rem;
+  vertical-align: -0.15em;
 }
 
 .cloud-last-upload {

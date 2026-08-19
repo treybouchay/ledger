@@ -695,6 +695,10 @@ function asPersonId(value: unknown): PersonId | null {
   return value === 'trevor' || value === 'kate' ? value : null
 }
 
+function otherHouseholdPerson(id: PersonId): PersonId {
+  return id === 'kate' ? 'trevor' : 'kate'
+}
+
 function personIdFromEmail(email: string | null | undefined): PersonId | null {
   if (!email) return null
   const local = email.split('@')[0] ?? ''
@@ -883,20 +887,42 @@ export async function listLedgerSnapshots(
         existing.personId ?? personIdFromEmail(user.email ?? null),
       email: existing.email ?? user.email ?? null,
     })
+    const currentPerson = members.get(user.id)?.personId ?? null
+    if (currentPerson) {
+      for (const [id, ident] of members) {
+        if (id === user.id || ident.personId) continue
+        members.set(id, {
+          ...ident,
+          personId: otherHouseholdPerson(currentPerson),
+        })
+      }
+    }
   }
+
+  const currentPersonId = user?.id
+    ? (members.get(user.id)?.personId ?? null)
+    : null
 
   return (rows ?? []).map((row) => {
     const record = row as Record<string, unknown>
     const createdBy = record.created_by ? String(record.created_by) : null
+    const isCurrentUser = Boolean(user?.id && createdBy === user.id)
     const fromMember = createdBy ? members.get(createdBy) : undefined
     const fromLabel = parseIdentityFromLabel(
       record.label ? String(record.label) : null,
     )
     const createdByEmail = fromMember?.email ?? fromLabel.email
-    const personId =
+    let personId =
       fromMember?.personId ??
       fromLabel.personId ??
       personIdFromEmail(createdByEmail)
+    if (!personId && currentPersonId) {
+      personId = isCurrentUser
+        ? currentPersonId
+        : createdBy
+          ? otherHouseholdPerson(currentPersonId)
+          : null
+    }
     return {
       id: String(record.id),
       createdAt: String(record.created_at),
@@ -907,7 +933,7 @@ export async function listLedgerSnapshots(
       personId,
       createdByEmail,
       createdBy,
-      isCurrentUser: Boolean(user?.id && createdBy === user.id),
+      isCurrentUser,
     }
   })
 }
