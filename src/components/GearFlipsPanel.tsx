@@ -20,6 +20,7 @@ import {
   isNonGearSpend,
   keptBuyIds,
   linkCashMoves,
+  netCashMadeForMonth,
   normalizeCashItem,
   openInventoryProjectedSummary,
   openNotListedBuysForMonth,
@@ -2222,6 +2223,10 @@ function CashLedger({
     () => realizedFlipProfitForMonth(moves, profitMonthId),
     [moves, profitMonthId],
   )
+  const monthCashMade = useMemo(
+    () => netCashMadeForMonth(moves, profitMonthId),
+    [moves, profitMonthId],
+  )
   const profitMonthLabel = useMemo(
     () => formatProfitMonthLabel(profitMonthId),
     [profitMonthId],
@@ -3268,7 +3273,11 @@ function CashLedger({
 
       <div className="cash-hero cash-profit-card">
         <div className="cash-hero-grid cash-profit-header">
-          <div className="cash-profit-metrics">
+          <div
+            className={`cash-profit-metrics${
+              monthCashMade.nonGear > 0 ? ' with-non-gear' : ''
+            }`}
+          >
             <div>
               <span className="stat-label">Profit</span>
               <div
@@ -3284,14 +3293,34 @@ function CashLedger({
                 {formatMoney(monthFlipProfit.profit)}
               </div>
             </div>
+            {monthCashMade.nonGear > 0 ? (
+              <div>
+                <span className="stat-label">Non-gear spend</span>
+                <div className="stat-value bad">
+                  −{formatMoney(monthCashMade.nonGear)}
+                </div>
+              </div>
+            ) : null}
             <div>
               <span className="stat-label">Total cash made</span>
-              <div className="stat-value">
-                {formatMoney(monthFlipProfit.sold)}
+              <div
+                className={`stat-value${
+                  monthCashMade.net < 0
+                    ? ' bad'
+                    : monthCashMade.net > 0
+                      ? ' good'
+                      : ''
+                }`}
+              >
+                {formatMoney(monthCashMade.net)}
               </div>
             </div>
             <p className="stat-sub cash-profit-metrics-sub">
-              Cost {formatMoney(monthFlipProfit.purchased)}
+              Sold {formatMoney(monthCashMade.sold)}
+              {monthCashMade.nonGear > 0
+                ? ` − non-gear ${formatMoney(monthCashMade.nonGear)}`
+                : ''}
+              {` · cost ${formatMoney(monthFlipProfit.purchased)}`}
               {monthFlipProfit.sellCount > 0
                 ? ` · ${monthFlipProfit.sellCount} sell${
                     monthFlipProfit.sellCount === 1 ? '' : 's'
