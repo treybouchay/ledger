@@ -618,9 +618,11 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     .map((l) => l.replace(/\s+/g, ' ').trim())
     .filter((l) => l.length > 0)
 
-  // Amex puts recent posted charges above the first dated section with no
-  // date header. Default those to today so Uber Eats Toronto etc. import.
-  let currentDate: string | null = localTodayYmd()
+  // Prefer statement section dates over "upload day". Only default to today when
+  // the OCR text has no date headers at all (undated live Amex top, etc.).
+  const hasDateHeaders = lines.some((l) => isDateOnlyLine(l))
+  let currentDate: string | null = hasDateHeaders ? null : localTodayYmd()
+  let seenDateHeader = false
   let pendingMerchant: string | null = null
   const rows: ParsedStatementRow[] = []
 
@@ -634,6 +636,7 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
 
     if (isDateOnlyLine(line)) {
       currentDate = normalizeStatementDate(extractDate(line)!)
+      seenDateHeader = true
       pendingMerchant = null
       continue
     }
@@ -675,9 +678,13 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     }
 
     const inlineDate = extractDate(line)
+    // Amex lists newest first: rows above the first date header are typically
+    // today's posted charges. Once a section date appears, stick to it.
     const date = inlineDate
       ? normalizeStatementDate(inlineDate)
-      : currentDate
+      : seenDateHeader
+        ? currentDate
+        : localTodayYmd()
     if (!date) {
       pendingMerchant = null
       continue

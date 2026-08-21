@@ -2208,7 +2208,7 @@ export default function App() {
                   />
                   {recentVariableCharges.length > 0 ? (
                     <div className="insight-recent">
-                      <span className="stat-label">Most recent</span>
+                      <span className="stat-label">Most recent charges</span>
                       <RecentChargeList charges={recentVariableCharges} />
                     </div>
                   ) : null}
@@ -4641,10 +4641,23 @@ function financialSayingForToday(now = new Date()): string {
   return FINANCIAL_SAYINGS[dayOfYear % FINANCIAL_SAYINGS.length]
 }
 
+function chargeDateKey(t: Pick<Transaction, 'date'>): string {
+  const raw = t.date?.trim().slice(0, 10) ?? ''
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : ''
+}
+
+/** Newest charge date first — never upload / import stamp. */
 function sortTransactionsMostRecent(transactions: Transaction[]): Transaction[] {
-  return [...transactions].sort(
-    (a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id),
-  )
+  return [...transactions].sort((a, b) => {
+    const da = chargeDateKey(a)
+    const db = chargeDateKey(b)
+    if (da && db && da !== db) return db.localeCompare(da)
+    if (db && !da) return 1
+    if (da && !db) return -1
+    const byAmount = Math.abs(b.amount) - Math.abs(a.amount)
+    if (byAmount !== 0) return byAmount
+    return a.merchant.localeCompare(b.merchant) || a.id.localeCompare(b.id)
+  })
 }
 
 function formatChargeDate(iso: string): string {
