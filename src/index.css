@@ -1206,6 +1206,24 @@ select {
   font-weight: 600;
 }
 
+.insight-card .what-if-cash-made {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed color-mix(in srgb, var(--line) 80%, transparent);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.insight-card .what-if-cash-made .good {
+  color: var(--good);
+  font-weight: 650;
+}
+
+.insight-card .what-if-cash-made .bad {
+  color: var(--bad);
+  font-weight: 650;
+}
+
 .spend-meter {
   margin-top: 0.65rem;
 }

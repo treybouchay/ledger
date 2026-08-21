@@ -930,6 +930,12 @@ export default function App() {
   // Infuse gross sell cash into the income what-if — non-gear spends come out of
   // the gear cash pool, not household monthly income / leftover.
   const cashMadeForIncome = monthCashMade.sold
+  /** Cash made − non-gear: hypothetical add-on for the On track to save card only. */
+  const gearCashNetForIncome = monthCashMade.net
+  const leftoverIfGearCashNet =
+    Math.round((actualLeftover + gearCashNetForIncome) * 100) / 100
+  const showLeftoverIfGearCash =
+    monthCashMade.sold !== 0 || monthCashMade.nonGear > 0
   const variableBudgetIfCashMade =
     Math.round((insightVariableBudget + cashMadeForIncome) * 100) / 100
   const leftOfVariableIfCashMade =
@@ -2253,6 +2259,20 @@ export default function App() {
                   <p className="stat-sub">
                     Income − fixed (assumed paid) − variable spent
                   </p>
+                  {showLeftoverIfGearCash ? (
+                    <p className="stat-sub what-if-cash-made">
+                      If + cash made − non-gear (
+                      {gearCashNetForIncome >= 0 ? '+' : ''}
+                      {formatMoney(gearCashNetForIncome)}) →{' '}
+                      <span
+                        className={
+                          leftoverIfGearCashNet >= 0 ? 'good' : 'bad'
+                        }
+                      >
+                        {formatMoney(leftoverIfGearCashNet)}
+                      </span>
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
