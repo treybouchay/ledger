@@ -912,9 +912,11 @@ export default function App() {
     monthFlipProfit.sellCount > 0 ||
     monthCashMade.nonGear > 0
   const showLedgerCashIn = monthLedgerCashIns.length > 0
-  // Hypothetical: net cash made (gross sold − non-gear spends) infused into variable budget.
+  // Infuse gross sell cash into the income what-if — non-gear spends come out of
+  // the gear cash pool, not household monthly income / leftover.
+  const cashMadeForIncome = monthCashMade.sold
   const variableBudgetIfCashMade =
-    Math.round((insightVariableBudget + monthCashMade.net) * 100) / 100
+    Math.round((insightVariableBudget + cashMadeForIncome) * 100) / 100
   const leftOfVariableIfCashMade =
     Math.round((variableBudgetIfCashMade - insightVariableSpent) * 100) / 100
   // Bar = uses of salary (fixed / variable / leftover) plus a distinct gear-flip
@@ -2243,8 +2245,8 @@ export default function App() {
                 className="budget-alloc-bar"
                 role="img"
                 aria-label={`Fixed bills assumed paid ${formatMoney(assumedFixedBills)}, variable spent ${formatMoney(actualVariableSpent)}${
-                  flipProfitPositive > 0 || monthCashMade.net !== 0
-                    ? `, gear flip profit ${formatMoney(flipProfitPositive)}, total cash made ${formatMoney(monthCashMade.net)}`
+                  flipProfitPositive > 0 || cashMadeForIncome !== 0
+                    ? `, gear flip profit ${formatMoney(flipProfitPositive)}, total cash made ${formatMoney(cashMadeForIncome)}`
                     : ''
                 }, leftover ${formatMoney(actualLeftover)}`}
               >
@@ -2280,7 +2282,7 @@ export default function App() {
                   <span
                     className="seg flip"
                     style={{ width: `${actualFlipPct}%` }}
-                    title="Cash infusion · gear flip profit & total cash made (sells − non-gear spends)"
+                    title="Cash infusion · gear flip profit & sell cash (non-gear spends stay in the gear cash pool)"
                   />
                 ) : null}
               </div>
@@ -2326,9 +2328,9 @@ export default function App() {
                     profit
                     <span className="legend-cash-made">
                       {' '}
-                      · {formatMoney(monthCashMade.net)} total cash made
+                      · {formatMoney(cashMadeForIncome)} total cash made
                       {monthCashMade.nonGear > 0
-                        ? ` (−${formatMoney(monthCashMade.nonGear)} non-gear)`
+                        ? ` · −${formatMoney(monthCashMade.nonGear)} non-gear (cash pool only)`
                         : ''}
                     </span>
                   </li>
@@ -2397,14 +2399,14 @@ export default function App() {
                     <span className="stat-micro-label">Total cash made</span>
                     <strong
                       className={
-                        monthCashMade.net < 0
+                        cashMadeForIncome < 0
                           ? 'bad'
-                          : monthCashMade.net > 0
+                          : cashMadeForIncome > 0
                             ? 'good'
                             : undefined
                       }
                     >
-                      {formatMoney(monthCashMade.net)}
+                      {formatMoney(cashMadeForIncome)}
                     </strong>
                   </div>
                 </div>
@@ -2416,7 +2418,7 @@ export default function App() {
                       }`
                     : ''}
                   {monthCashMade.nonGear > 0
-                    ? ` · −${formatMoney(monthCashMade.nonGear)} non-gear`
+                    ? ` · −${formatMoney(monthCashMade.nonGear)} non-gear (cash pool, not income)`
                     : ''}
                   {' · '}
                   <button
@@ -2441,7 +2443,7 @@ export default function App() {
                   : 'Planned variable caps this month'}
               </p>
               {showFlipProfit &&
-              (monthCashMade.net !== 0 || monthCashMade.sold > 0) ? (
+              (cashMadeForIncome !== 0 || monthCashMade.sold > 0) ? (
                 <p className="stat-sub what-if-cash-made">
                   If + total cash made →{' '}
                   {formatMoney(variableBudgetIfCashMade)}

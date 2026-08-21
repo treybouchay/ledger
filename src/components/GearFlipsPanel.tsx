@@ -3318,7 +3318,7 @@ function CashLedger({
             <p className="stat-sub cash-profit-metrics-sub">
               Sold {formatMoney(monthCashMade.sold)}
               {monthCashMade.nonGear > 0
-                ? ` − non-gear ${formatMoney(monthCashMade.nonGear)}`
+                ? ` − non-gear ${formatMoney(monthCashMade.nonGear)} (cash pool)`
                 : ''}
               {` · cost ${formatMoney(monthFlipProfit.purchased)}`}
               {monthFlipProfit.sellCount > 0
@@ -3327,7 +3327,7 @@ function CashLedger({
                   }`
                 : ''}
               {' · '}
-              Linked flips
+              Linked flips · not monthly income
             </p>
           </div>
           <div

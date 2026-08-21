@@ -830,7 +830,7 @@ export function nonGearSpendForMonth(
 
 /**
  * Gross linked-sell cash made for the month, minus non-gear spends that month.
- * Used on the home overview “Total cash made” figure.
+ * Gear cash-pool figure only — non-gear does not reduce household monthly income.
  */
 export function netCashMadeForMonth(
   cash: GearCashMove[],
