@@ -836,8 +836,9 @@ function parseSectionedActivity(
     }
 
     pendingMerchant = null
-    const usedPendingAmount = pendingAmount != null && finalAmount === pendingAmount
-    pendingAmount = usedPendingAmount ? null : pendingAmount
+    const usedPendingAmount: boolean =
+      pendingAmount != null && finalAmount === pendingAmount
+    if (usedPendingAmount) pendingAmount = null
 
     if (!merchant || !isPlausibleMerchant(merchant)) {
       // Keep amount for the following payee line.
@@ -847,7 +848,7 @@ function parseSectionedActivity(
       continue
     }
 
-    if (!usedPendingAmount) pendingAmount = null
+    pendingAmount = null
 
     const looksLikeRefund =
       amount < 0 ||

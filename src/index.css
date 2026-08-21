@@ -7018,6 +7018,15 @@ button.linkish {
   display: flex;
   gap: 0.65rem;
   justify-content: flex-end;
+  align-items: center;
+}
+
+.log-actions .log-delete {
+  margin-right: auto;
+}
+
+.ghost.danger {
+  color: var(--bad);
 }
 
 .custom-category-list {

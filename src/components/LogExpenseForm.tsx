@@ -21,6 +21,8 @@ function entryKindFromTx(tx?: Transaction): EntryKind {
 interface LogExpenseFormProps {
   onSave: (tx: Transaction) => void
   onCancel?: () => void
+  /** When editing — removes the transaction after confirm in the parent. */
+  onDelete?: () => void
   defaultPersonId?: PersonId
   /** When set, form edits this transaction instead of creating a new one. */
   initial?: Transaction
@@ -29,6 +31,7 @@ interface LogExpenseFormProps {
 export function LogExpenseForm({
   onSave,
   onCancel,
+  onDelete,
   defaultPersonId = 'trevor',
   initial,
 }: LogExpenseFormProps) {
@@ -218,6 +221,15 @@ export function LogExpenseForm({
         </p>
       ) : null}
       <div className="log-actions">
+        {editing && onDelete ? (
+          <button
+            type="button"
+            className="ghost danger log-delete"
+            onClick={onDelete}
+          >
+            Delete
+          </button>
+        ) : null}
         {onCancel ? (
           <button type="button" className="ghost" onClick={onCancel}>
             Cancel

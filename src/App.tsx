@@ -1617,6 +1617,19 @@ export default function App() {
     if (tx.monthId) setMonthId(tx.monthId)
   }
 
+  function deleteTransaction(tx: Transaction): boolean {
+    const ok = confirmRemove(
+      `Delete “${tx.merchant}” ${formatMoney(tx.amount)} on ${tx.date}?\n\nThis cannot be undone except via backup.`,
+    )
+    if (!ok) return false
+    setTransactions((prev) => {
+      const next = prev.filter((t) => t.id !== tx.id)
+      saveTransactions(next, { allowEmpty: next.length === 0 })
+      return next
+    })
+    return true
+  }
+
   function reassignStatementAccount(
     importId: string,
     accountId: Transaction['accountId'],
@@ -3276,6 +3289,7 @@ export default function App() {
                           onRemoveRule={removeLearnedRule}
                           onAssignTransaction={assignTransactionToCategory}
                           onUpdateTransaction={updateTransaction}
+                          onDeleteTransaction={deleteTransaction}
                         />
                       )
                     })}
@@ -3601,6 +3615,7 @@ export default function App() {
                         showCategory
                         showAccount={false}
                         onUpdate={updateTransaction}
+                        onDelete={deleteTransaction}
                       />
                     )}
                   </section>
@@ -4047,6 +4062,7 @@ export default function App() {
                       showCategory
                       showAccount
                       onUpdate={updateTransaction}
+                      onDelete={deleteTransaction}
                     />
                   )}
                 </div>
@@ -4175,6 +4191,7 @@ function CategoryAccordionRow({
   onRemoveRule,
   onAssignTransaction,
   onUpdateTransaction,
+  onDeleteTransaction,
 }: {
   row: CategoryRollup
   expanded: boolean
@@ -4191,6 +4208,7 @@ function CategoryAccordionRow({
     pattern: string,
   ) => void
   onUpdateTransaction: (tx: Transaction) => void
+  onDeleteTransaction: (tx: Transaction) => boolean | void
 }) {
   const [showAllTransactions, setShowAllTransactions] = useState(false)
   const refunds = transactions
@@ -4319,6 +4337,7 @@ function CategoryAccordionRow({
                   transactions={transactions}
                   showCategory={false}
                   onUpdate={onUpdateTransaction}
+                  onDelete={onDeleteTransaction}
                 />
               ) : null}
             </div>
@@ -4385,11 +4404,13 @@ function TransactionTable({
   showCategory,
   showAccount = true,
   onUpdate,
+  onDelete,
 }: {
   transactions: Transaction[]
   showCategory: boolean
   showAccount?: boolean
   onUpdate?: (tx: Transaction) => void
+  onDelete?: (tx: Transaction) => boolean | void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const editable = Boolean(onUpdate)
@@ -4467,6 +4488,14 @@ function TransactionTable({
                   initial={t}
                   defaultPersonId={t.personId}
                   onCancel={() => setEditingId(null)}
+                  onDelete={
+                    onDelete
+                      ? () => {
+                          const removed = onDelete(t)
+                          if (removed !== false) setEditingId(null)
+                        }
+                      : undefined
+                  }
                   onSave={(next) => {
                     onUpdate(next)
                     setEditingId(null)
