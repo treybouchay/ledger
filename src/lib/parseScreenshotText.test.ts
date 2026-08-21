@@ -586,13 +586,13 @@ Account
 `
 
 {
-  const today = new Date()
-  const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
   const rows = parseScreenshotText(amexAug10UndatedUberTwinAmazon)
   assert.equal(rows.length, 3, `expected Uber + 2 Amazons, got ${rows.length}: ${rows.map((r) => r.merchant).join(', ')}`)
   const uber = rows.find((r) => /uber/i.test(r.merchant) && r.amount === 91.27)
   assert.ok(uber, 'undated UBER EATS TORONTO $91.27 (no Pending) must import')
-  assert.equal(uber!.date, todayYmd)
+  // Prefer the next section header over upload-day — mid-scroll crops omit the
+  // header above the first visible charge.
+  assert.equal(uber!.date, '2026-08-06')
   assert.equal(uber!.isRefund, false)
   const amazons = rows.filter((r) => /amzn/i.test(r.merchant))
   assert.equal(amazons.length, 2)
@@ -603,6 +603,67 @@ Account
   )
   assert.ok(rows.every((r) => !/tim\s*hort|loan|50,?000|amazoncom|pending/i.test(r.merchant)))
   assert.ok(!rows.some((r) => r.amount === 50000 || r.amount === 32.26 || r.amount === 8.13))
+}
+
+{
+  const amexPlanItPlaystation = `
+SimplyCash Preferred Card
+13 Aug
+GOOD EARTH COFFEEHOUSE OSHAWA
+$8.31
+LM WHITBY WHITBY
+$26.18
+PLAYSTATION
+877-971-7669
+$124.29
+Plan It
+TIM HORTONS #2616 WHITBY
+$13.31
+12 Aug
+GOOD EARTH COFFEEHOUSE OSHAWA
+$4.07
+PETRO-CANADA 65036 WHITBY
+$78.63
+`
+  const rows = parseScreenshotText(amexPlanItPlaystation)
+  assert.equal(
+    rows.length,
+    6,
+    `expected 6 charges incl PlayStation, got ${rows.length}: ${rows.map((r) => r.merchant).join(', ')}`,
+  )
+  const ps = rows.find((r) => /playstation/i.test(r.merchant))
+  assert.ok(ps, 'PLAYSTATION with Plan It badge must import')
+  assert.equal(ps!.amount, 124.29)
+  assert.equal(ps!.date, '2026-08-13')
+  assert.ok(!/plan\s*it/i.test(ps!.merchant), 'Plan It badge must not stick to payee')
+  assert.ok(!rows.some((r) => /plan\s*it/i.test(r.merchant)))
+}
+
+{
+  // Multi-screenshot carry / undated prefix: use section date, not upload day.
+  const page2 = `
+SimplyCash Preferred Card
+OLD NAVY
+−$22.59
+WHITBY
+11 Aug
+AMZN MKTP CA
+$12.00
+`
+  const carried = parseScreenshotText(page2, { initialDate: '2026-08-11' })
+  const navy = carried.find((r) => /old navy/i.test(r.merchant))
+  assert.ok(navy, `expected Old Navy, got ${carried.map((r) => r.merchant).join(', ')}`)
+  assert.equal(navy!.date, '2026-08-11')
+  assert.equal(navy!.isRefund, true)
+
+  const undatedPrefix = parseScreenshotText(page2)
+  const navy2 = undatedPrefix.find((r) => /old navy/i.test(r.merchant))
+  assert.ok(navy2)
+  assert.equal(
+    navy2!.date,
+    '2026-08-11',
+    'undated rows above a date header must use that section date, not today',
+  )
 }
 
 // Real OCR: -$45.19 → -845.19 ($ misread as 8); second minus lost → still twin refunds.

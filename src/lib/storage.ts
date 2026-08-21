@@ -353,12 +353,68 @@ export function recoverOrphanedImportTransactions(
   return { transactions: merged, recoveredCount: added.length }
 }
 
+/**
+ * Screenshot imports sometimes stamped undated Amex rows with the upload day.
+ * When the same import also has real section dates that are older, move those
+ * upload-day rows back to the newest real charge date in that import.
+ */
+export function repairUploadDayChargeDates(
+  transactions: Transaction[],
+  imports: StatementImport[],
+): { transactions: Transaction[]; repairedCount: number } {
+  const importById = new Map(imports.map((row) => [row.id, row]))
+  const byImport = new Map<string, Transaction[]>()
+  for (const t of transactions) {
+    if (!t.importId) continue
+    const list = byImport.get(t.importId)
+    if (list) list.push(t)
+    else byImport.set(t.importId, [t])
+  }
+
+  const fixes = new Map<string, string>()
+  for (const [importId, txs] of byImport) {
+    const imp = importById.get(importId)
+    if (!imp || imp.sourceKind === 'statement') continue
+    const uploadedDay = (imp.uploadedAt || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(uploadedDay)) continue
+
+    const otherDates = txs
+      .map((t) => t.date.slice(0, 10))
+      .filter(
+        (d) => d !== uploadedDay && /^\d{4}-\d{2}-\d{2}$/.test(d),
+      )
+    if (otherDates.length === 0) continue
+    const maxReal = otherDates.reduce((a, b) => (a > b ? a : b))
+    // Only rewrite when upload day is clearly newer than every dated charge —
+    // those rows were almost certainly OCR-defaulted to "today".
+    if (uploadedDay <= maxReal) continue
+
+    for (const t of txs) {
+      if (t.date.slice(0, 10) === uploadedDay) fixes.set(t.id, maxReal)
+    }
+  }
+
+  if (fixes.size === 0) {
+    return { transactions, repairedCount: 0 }
+  }
+
+  return {
+    transactions: transactions.map((t) => {
+      const nextDate = fixes.get(t.id)
+      if (!nextDate) return t
+      return { ...t, date: nextDate, monthId: nextDate.slice(0, 7) }
+    }),
+    repairedCount: fixes.size,
+  }
+}
+
 /** Load txs + imports together and attempt orphan / last-good recovery. */
 export function bootstrapLedger(): {
   transactions: Transaction[]
   imports: StatementImport[]
   recoveredCount: number
   recoveredFromLastGood: boolean
+  repairedUploadDates: number
 } {
   const loadedImports = loadImports()
   const loadedTx = loadTransactions()
@@ -366,11 +422,25 @@ export function bootstrapLedger(): {
     loadedTx.transactions,
     loadedImports.imports,
   )
-  return {
+  const repaired = repairUploadDayChargeDates(
     transactions,
+    loadedImports.imports,
+  )
+  if (repaired.repairedCount > 0) {
+    const saved = saveTransactions(repaired.transactions)
+    if (!saved.ok) {
+      console.warn(
+        '[household-ledger] could not persist upload-day date repair',
+        saved.error,
+      )
+    }
+  }
+  return {
+    transactions: repaired.transactions,
     imports: loadedImports.imports,
     recoveredCount,
     recoveredFromLastGood:
       loadedTx.recoveredFromLastGood || loadedImports.recoveredFromLastGood,
+    repairedUploadDates: repaired.repairedCount,
   }
 }

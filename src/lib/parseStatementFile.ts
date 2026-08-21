@@ -47,6 +47,8 @@ export async function parseStatementFile(
   file: File,
   options?: {
     onOcrProgress?: (status: string, progress: number) => void
+    /** Continue Amex/TD section dates across multi-screenshot scrolls. */
+    initialDate?: string | null
   },
 ): Promise<ParseStatementResult> {
   const name = file.name.toLowerCase()
@@ -96,7 +98,9 @@ export async function parseStatementFile(
       }
     }
 
-    const rows = parseScreenshotText(text)
+    const rows = parseScreenshotText(text, {
+      initialDate: options?.initialDate,
+    })
     return {
       rows,
       sourceKind: 'screenshot',

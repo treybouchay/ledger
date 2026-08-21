@@ -101,6 +101,7 @@ import {
   loadSideNavExpanded,
   peekLedgerCounts,
   pickInitialMonthId,
+  repairUploadDayChargeDates,
   restoreImportsFromLastGood,
   restoreTransactionsFromLastGood,
   saveImports,
@@ -199,6 +200,10 @@ export default function App() {
     ),
   )
   const [storageWarning, setStorageWarning] = useState<string | null>(() => {
+    if (ledgerBoot.repairedUploadDates > 0) {
+      const n = ledgerBoot.repairedUploadDates
+      return `Corrected ${n} charge date${n === 1 ? '' : 's'} that had been set to the upload day — they now use the statement section date.`
+    }
     if (ledgerBoot.recoveredFromLastGood) {
       const n = ledgerBoot.transactions.length
       return `Restored ${n} transaction${n === 1 ? '' : 's'} from a backup snapshot after the primary store looked empty.`
@@ -572,9 +577,13 @@ export default function App() {
   ])
 
   function applyCloudPull(backup: ReturnType<typeof buildBackup>) {
+    const repaired = repairUploadDayChargeDates(
+      backup.transactions,
+      backup.imports,
+    )
     skipNextTxPersistRef.current = true
     skipNextImportsPersistRef.current = true
-    setTransactions(backup.transactions)
+    setTransactions(repaired.transactions)
     setImports(backup.imports)
     setLearnedRules(backup.learnedRules)
     setCustomCategories(getCustomCategories())
@@ -584,11 +593,17 @@ export default function App() {
     setViewingImportId(null)
     setMonthId(
       pickInitialMonthId(
-        backup.transactions,
+        repaired.transactions,
         ACTIVE_MONTH_ID,
         backup.imports,
       ),
     )
+    if (repaired.repairedCount > 0) {
+      saveTransactions(repaired.transactions)
+      setStorageWarning(
+        `Corrected ${repaired.repairedCount} charge date${repaired.repairedCount === 1 ? '' : 's'} that had been set to the upload day.`,
+      )
+    }
   }
 
   // Another tab wrote ledger keys — reload so we don't overwrite newer data.

@@ -29,13 +29,24 @@ const PHONE_LIKE =
 const PHONE_IN_TEXT =
   /\b(?:\+?1[-.\s]*)?(?:\(?\d{3}\)?[-.\s]*)\d{3}[-.\s]*\d{4}\b/g
 
+export type ParseScreenshotOptions = {
+  /**
+   * Starting section date when continuing a multi-screenshot scroll
+   * (previous image’s last charge date). Prefer this over “today”.
+   */
+  initialDate?: string | null
+}
+
 /**
  * Bank app screenshots (Amex / TD) put dates on section headers and
  * merchant + amount on the rows below. Carry the date forward.
  */
-export function parseScreenshotText(text: string): ParsedStatementRow[] {
+export function parseScreenshotText(
+  text: string,
+  options?: ParseScreenshotOptions,
+): ParsedStatementRow[] {
   const scrubbed = scrubPhoneAmountOcr(normalizeCreditAmountGlyphs(text))
-  const fromSections = parseSectionedActivity(scrubbed)
+  const fromSections = parseSectionedActivity(scrubbed, options)
 
   // Sectioned parse is authoritative for Amex/TD activity screenshots — even
   // when every visible row is Pending (zero posted). Falling back to naive
@@ -100,7 +111,17 @@ const REGION_CODE =
 
 /** One-word payees that must not be mistaken for city subtitles. */
 const SINGLE_WORD_MERCHANT =
-  /^(nordstrom|starbucks|costco|walmart|target|netflix|spotify|uber|ubereats|lyft|sobeys|loblaws|amazon|factor|docupet|cursor|metro|apple|google|mcdonalds|sidelineswap|openai|petro|esso|shell)$/i
+  /^(nordstrom|starbucks|costco|walmart|target|netflix|spotify|uber|ubereats|lyft|sobeys|loblaws|amazon|factor|docupet|cursor|metro|apple|google|mcdonalds|sidelineswap|openai|petro|esso|shell|playstation|sony|nintendo|xbox|steam|discord|paypal|venmo|instacart|doordash|skip|skipthedishes|landmark|cineplex|bestbuy|ikea|zara|h\s*&\s*m|oldnavy|gap|lululemon|milestones)$/i
+
+/**
+ * Amex “Plan It” installment badge (often under the amount). Same slot as
+ * Credit/Pending — never a payee, and never treat OCR’d “Pending” lookalikes
+ * here; Plan It marks a *posted* charge.
+ */
+function isPlanItStatusOnly(line: string): boolean {
+  const t = line.replace(/\s+/g, ' ').trim()
+  return /^plan\s*it\.?$/i.test(t) || /^planit\.?$/i.test(t)
+}
 
 /**
  * Amex puts city / phone / URL fragments under the amount. Those are not the
@@ -110,7 +131,9 @@ const SINGLE_WORD_MERCHANT =
 function isLocationOrDetailSubtitle(line: string): boolean {
   const t = line.replace(/\s+/g, ' ').trim()
   if (!t) return false
-  if (isCreditStatusOnly(t) || isPendingStatusOnly(t)) return false
+  if (isCreditStatusOnly(t) || isPendingStatusOnly(t) || isPlanItStatusOnly(t)) {
+    return false
+  }
   if (isDateOnlyLine(t) || lineHasAmount(t)) return false
   // Pure phone / digits — Amex puts these under the payee.
   if (PHONE_LIKE.test(t)) return true
@@ -177,7 +200,7 @@ function chargeLooksPending(lines: string[], amountIndex: number): boolean {
   for (let j = amountIndex + 1; j < Math.min(lines.length, amountIndex + 4); j += 1) {
     const next = lines[j]
     if (isPendingStatusOnly(next)) return true
-    if (isCreditStatusOnly(next)) continue
+    if (isCreditStatusOnly(next) || isPlanItStatusOnly(next)) continue
     if (isDateOnlyLine(next) || lineHasAmount(next)) break
     if (isLocationOrDetailSubtitle(next)) continue
     if (isPlausibleMerchant(stripToMerchant(next))) break
@@ -208,7 +231,7 @@ function chargeLooksLikeCredit(lines: string[], amountIndex: number): boolean {
   for (let j = amountIndex + 1; j < Math.min(lines.length, amountIndex + 4); j += 1) {
     const next = lines[j]
     if (isCreditStatusOnly(next)) return true
-    if (isPendingStatusOnly(next)) break
+    if (isPendingStatusOnly(next) || isPlanItStatusOnly(next)) break
     if (isDateOnlyLine(next) || lineHasAmount(next)) break
     if (isLocationOrDetailSubtitle(next)) continue
     if (isPlausibleMerchant(stripToMerchant(next))) break
@@ -432,6 +455,7 @@ function isPlausibleMerchant(merchant: string): boolean {
   if (m.length < 2) return false
   if (PHONE_LIKE.test(m)) return false
   if (!/[a-z]/i.test(m)) return false
+  if (isPlanItStatusOnly(m)) return false
   if (
     /^(opening|closing|total|subtotal|balance|credit|refund|return|pending)$/i.test(
       m,
@@ -592,7 +616,7 @@ function resolveMerchant(
 
 /** Prefer recognizable brand payees when OCR also emits city/URL crumbs. */
 function isStrongPayeeName(merchant: string): boolean {
-  return /uber|amzn|amazon|starbucks|tim\s*hort|mcdonald|petro|openai|chatgpt|nordstrom|wal-?mart|metro|costco|spotify|docupet|sidelineswap|factor|lyft/i.test(
+  return /uber|amzn|amazon|starbucks|tim\s*hort|mcdonald|petro|openai|chatgpt|nordstrom|wal-?mart|metro|costco|spotify|docupet|sidelineswap|factor|lyft|playstation|sony|nintendo|xbox/i.test(
     merchant,
   )
 }
@@ -600,6 +624,8 @@ function isStrongPayeeName(merchant: string): boolean {
 /** OCR glue / star variants → readable Uber Eats label. */
 function normalizeUberMerchant(merchant: string): string {
   let m = merchant.replace(/\s+/g, ' ').trim()
+  // Amex Plan It badge sometimes glues onto the payee name.
+  m = m.replace(/\bplan\s*it\b/gi, ' ').replace(/\s+/g, ' ').trim()
   m = m.replace(/\bUBER\s*\*?\s*EATS\b/i, 'UBER EATS')
   m = m.replace(/\bUBEREATS\b/i, 'UBER EATS')
   if (!/uber/i.test(m)) return m
@@ -612,17 +638,38 @@ function normalizeUberMerchant(merchant: string): string {
   return m.replace(/\s+/g, ' ').trim() || merchant
 }
 
-function parseSectionedActivity(text: string): ParsedStatementRow[] {
+function firstDateHeaderDate(lines: string[]): string | null {
+  for (const line of lines) {
+    if (!isDateOnlyLine(line)) continue
+    const raw = extractDate(line)
+    if (!raw) continue
+    const normalized = normalizeStatementDate(raw)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized
+  }
+  return null
+}
+
+function parseSectionedActivity(
+  text: string,
+  options?: ParseScreenshotOptions,
+): ParsedStatementRow[] {
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.replace(/\s+/g, ' ').trim())
     .filter((l) => l.length > 0)
 
-  // Prefer statement section dates over "upload day". Only default to today when
-  // the OCR text has no date headers at all (undated live Amex top, etc.).
-  const hasDateHeaders = lines.some((l) => isDateOnlyLine(l))
-  let currentDate: string | null = hasDateHeaders ? null : localTodayYmd()
-  let seenDateHeader = false
+  // Never stamp undated rows with "upload day" when the screenshot already has
+  // section headers (or a prior image’s date). Mid-scroll crops often omit the
+  // header above the first visible charge — use the next header instead of today.
+  const firstHeaderDate = firstDateHeaderDate(lines)
+  const seeded =
+    (options?.initialDate &&
+    /^\d{4}-\d{2}-\d{2}$/.test(options.initialDate.slice(0, 10))
+      ? options.initialDate.slice(0, 10)
+      : null) ??
+    firstHeaderDate ??
+    localTodayYmd()
+  let currentDate: string | null = seeded
   let pendingMerchant: string | null = null
   const rows: ParsedStatementRow[] = []
 
@@ -630,13 +677,12 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     const line = lines[i]
     if (SKIP_LINE.test(line) || SKIP_PROMO.test(line)) continue
     if (isPendingStatusOnly(line)) continue
-    // Keep pending merchant; Credit badge is read from neighbors of the amount.
-    if (isCreditStatusOnly(line)) continue
+    // Keep pending merchant; Credit / Plan It badges are not payees.
+    if (isCreditStatusOnly(line) || isPlanItStatusOnly(line)) continue
     if (/page\s+\d+/i.test(line)) continue
 
     if (isDateOnlyLine(line)) {
       currentDate = normalizeStatementDate(extractDate(line)!)
-      seenDateHeader = true
       pendingMerchant = null
       continue
     }
@@ -678,13 +724,9 @@ function parseSectionedActivity(text: string): ParsedStatementRow[] {
     }
 
     const inlineDate = extractDate(line)
-    // Amex lists newest first: rows above the first date header are typically
-    // today's posted charges. Once a section date appears, stick to it.
     const date = inlineDate
       ? normalizeStatementDate(inlineDate)
-      : seenDateHeader
-        ? currentDate
-        : localTodayYmd()
+      : currentDate
     if (!date) {
       pendingMerchant = null
       continue
@@ -777,7 +819,7 @@ function findMerchantAbove(lines: string[], index: number): string | null {
     const prev = lines[j]
     if (isDateOnlyLine(prev)) break
     if (SKIP_LINE.test(prev) || SKIP_PROMO.test(prev) || isPendingStatusOnly(prev)) break
-    if (isCreditStatusOnly(prev)) continue
+    if (isCreditStatusOnly(prev) || isPlanItStatusOnly(prev)) continue
     if (isLocationOrDetailSubtitle(prev)) continue
     if (lineHasAmount(prev)) break
     const m = stripToMerchant(prev)

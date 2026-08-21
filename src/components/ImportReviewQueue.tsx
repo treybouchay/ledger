@@ -330,6 +330,9 @@ export function ImportReviewQueue({
       let detectedPersonId: PersonId | undefined
       let detectionNoteLocal: string | undefined
       let suggestedAccountId: AccountId | undefined
+      // Amex/TD lists are newest-first; carry the last (oldest) charge date into
+      // the next screenshot so mid-scroll pages don’t get stamped as today.
+      let carryDate: string | null = null
 
       for (let i = 0; i < incoming.length; i += 1) {
         const file = incoming[i]
@@ -339,6 +342,7 @@ export function ImportReviewQueue({
             : `Reading screenshots (OCR) ${i + 1}/${total}…`,
         )
         const result = await parseStatementFile(file, {
+          initialDate: carryDate,
           onOcrProgress: (status, progress) => {
             const pct = Math.round(progress * 100)
             const prefix =
@@ -358,6 +362,10 @@ export function ImportReviewQueue({
             sourceLabel: row.sourceLabel ?? file.name,
           })),
         )
+        if (result.rows.length > 0) {
+          const last = result.rows[result.rows.length - 1]?.date?.slice(0, 10)
+          if (last && /^\d{4}-\d{2}-\d{2}$/.test(last)) carryDate = last
+        }
         if (result.warning) {
           warnings.push(
             total === 1 ? result.warning : `${file.name}: ${result.warning}`,

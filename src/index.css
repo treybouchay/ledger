@@ -4282,6 +4282,11 @@ select {
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
 }
 
+.cash-link-modal.screenshot-viewer {
+  width: min(52rem, 96vw);
+  max-height: min(96vh, 56rem);
+}
+
 .cash-link-modal-header {
   display: flex;
   align-items: flex-start;
@@ -6104,11 +6109,12 @@ select {
 .statement-file-img {
   display: block;
   max-width: 100%;
-  max-height: min(52vh, 28rem);
+  max-height: min(78vh, 42rem);
   margin: 0 auto;
   border-radius: 12px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: #0f1218;
+  object-fit: contain;
 }
 
 .statement-file-text {
@@ -6512,25 +6518,34 @@ button.linkish {
 }
 
 .screenshot-viewer {
-  max-width: min(560px, 94vw);
+  width: min(52rem, 96vw);
+  max-width: min(52rem, 96vw);
+  max-height: min(96vh, 56rem);
 }
 
 .screenshot-viewer-image {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 12px;
-  overflow: hidden;
+  overflow: auto;
   background: #0f1218;
 }
 
 .screenshot-viewer-image img {
   display: block;
-  width: 100%;
+  width: auto;
   height: auto;
-  max-height: min(68vh, 720px);
+  max-width: 100%;
+  max-height: min(82vh, 900px);
   object-fit: contain;
 }
 
 .screenshot-viewer-actions {
   justify-content: space-between;
+  flex-shrink: 0;
 }
 
 .screenshot-preview-grid .screenshot-preview {
