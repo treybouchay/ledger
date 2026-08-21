@@ -337,8 +337,8 @@ export function scrubPhoneAmountOcr(text: string): string {
 function repairAmountsOnLine(line: string, context: string): string {
   let next = line
 
-  // OCR `$` → `S` then digits: S16.77 → $16.77
-  next = next.replace(/(^|[\s])S(\d{1,3}\.\d{2})\b/g, '$1$$$2')
+  // OCR `$` → `S` then digits: S16.77 → $16.77 (and S100.00 → $100.00).
+  next = next.replace(/(^|[\s])S(\d{1,3}(?:,\d{3})*\.\d{2})\b/g, '$1$$$2')
 
   // Bare amount with leading 5 from `$` (`516.77` / `52.00`) when line has no $.
   if (!/\$/.test(next)) {
@@ -419,18 +419,34 @@ function stripStoreContaminatingDigit(store: string, amount: string): string {
   // Last digit of store glued: 8 + 4.80 → 84.80
   if (digits.endsWith(amount[0])) {
     const rest = amount.slice(1)
-    if (/^\d{0,2}\.\d{1,2}$/.test(rest) && Number(rest) > 0 && Number(rest) < 100) {
-      return rest.startsWith('.') ? amount : rest
+    // Only strip when the remainder looks like a short price (one digit dollars).
+    // Avoid `#2616 … $13.31` → `$3.31` (second digit of 13 matching store “1”).
+    if (/^\d\.\d{1,2}$/.test(rest) && Number(rest) > 0 && Number(rest) < 10) {
+      return rest
     }
   }
   // Second-to-last glued: 84958 → 5 + 4.80 → 54.80
   if (digits.length >= 2 && digits[digits.length - 2] === amount[0]) {
     const rest = amount.slice(1)
-    if (/^\d{0,2}\.\d{1,2}$/.test(rest) && Number(rest) > 0 && Number(rest) < 100) {
-      return rest.startsWith('.') ? amount : rest
+    if (/^\d\.\d{1,2}$/.test(rest) && Number(rest) > 0 && Number(rest) < 10) {
+      return rest
     }
   }
   return amount
+}
+
+/**
+ * True when the line is basically just a money amount (Amex right-column OCR
+ * often emits `$124.29` on its own line *above* the merchant).
+ */
+function isAmountOnlyLine(line: string): boolean {
+  const amounts = amountsOnLine(line)
+  if (amounts.length !== 1) return false
+  let rest = stripToMerchant(line)
+  // Trailing `$`→`S` junk left after a split amount line.
+  rest = rest.replace(/^s$/i, '').trim()
+  if (!rest) return true
+  return !isPlausibleMerchant(rest) && rest.length <= 3
 }
 
 function stripPhones(line: string): string {
@@ -556,10 +572,16 @@ function amountFromLine(line: string, context: string): number | null {
     }
   }
 
-  // Repair store-# contamination using digits still visible on the raw line.
-  const store = line.match(/#\s*(\d{3,})\b/)
-  if (store) {
-    const fixed = stripStoreContaminatingDigit(store[1], Math.abs(amount).toFixed(2))
+  // Repair store-# contamination only when the # and amount are adjacent
+  // (OCR glued `#849584.80`). Skip when city text sits between (`#2616 WHITBY $13.31`).
+  const gluedStore = line.match(
+    /#\s*(\d{3,})\s*\$?\s*(\d{1,3}\.\d{1,2})\b/,
+  )
+  if (gluedStore) {
+    const fixed = stripStoreContaminatingDigit(
+      gluedStore[1],
+      Math.abs(amount).toFixed(2),
+    )
     if (fixed !== Math.abs(amount).toFixed(2)) {
       amount = amount < 0 ? -Number(fixed) : Number(fixed)
     }
@@ -671,6 +693,8 @@ function parseSectionedActivity(
     localTodayYmd()
   let currentDate: string | null = seeded
   let pendingMerchant: string | null = null
+  /** Amount OCR’d on the line above the payee (Amex right-column). */
+  let pendingAmount: number | null = null
   const rows: ParsedStatementRow[] = []
 
   for (let i = 0; i < lines.length; i += 1) {
@@ -684,18 +708,44 @@ function parseSectionedActivity(
     if (isDateOnlyLine(line)) {
       currentDate = normalizeStatementDate(extractDate(line)!)
       pendingMerchant = null
+      pendingAmount = null
       continue
     }
 
     const context = [lines[i - 1], line, lines[i + 1]].filter(Boolean).join(' ')
     const distinctAmounts = amountsOnLine(line)
-    const amount = amountFromLine(line, context)
-    const merchantOnLine = stripToMerchant(line)
+    let amount = amountFromLine(line, context)
+    const merchantOnLine = stripToMerchant(line).replace(/\bs\b/gi, ' ').replace(/\s+/g, ' ').trim()
+
+    // Plan It rows: OCR often turns `$124.29` into `S252` (no cents). Ignore
+    // whole-dollar junk on the payee line when Plan It is the next badge.
+    if (
+      amount != null &&
+      !/\d+\.\d{2}/.test(line) &&
+      !/\$\s*\d/.test(line) &&
+      lines.slice(i + 1, i + 3).some((l) => isPlanItStatusOnly(l))
+    ) {
+      amount = null
+    }
 
     if (!amount) {
       // City / phone under a prior charge must not become the next payee.
       if (isLocationOrDetailSubtitle(line)) continue
       if (isPlausibleMerchant(merchantOnLine)) {
+        // Orphan amount on the prior line → this payee.
+        if (pendingAmount != null && currentDate) {
+          rows.push({
+            date: currentDate,
+            amount: pendingAmount,
+            merchant: normalizeUberMerchant(merchantOnLine),
+            suggestedCategoryId: suggestCategory(merchantOnLine),
+            suggestedAccountId: 'other',
+            isRefund: false,
+          })
+          pendingAmount = null
+          pendingMerchant = null
+          continue
+        }
         // OCR often splits "UBER" / "EATS" or "DOCUPET" / "PET" across lines.
         if (
           pendingMerchant &&
@@ -715,12 +765,36 @@ function parseSectionedActivity(
     // Do not import Pending auth holds — only posted activity.
     if (chargeLooksPending(lines, i)) {
       pendingMerchant = null
+      pendingAmount = null
       continue
     }
 
     if (distinctAmounts.length > 1) {
       pendingMerchant = null
+      pendingAmount = null
       continue
+    }
+
+    // Bare amount line (right column). Amex OCR may put it above OR below the payee.
+    if (isAmountOnlyLine(line)) {
+      const onlyAmt = Math.abs(amount)
+      if (pendingMerchant && currentDate) {
+        rows.push({
+          date: currentDate,
+          amount: onlyAmt,
+          merchant: normalizeUberMerchant(pendingMerchant),
+          suggestedCategoryId: suggestCategory(pendingMerchant),
+          suggestedAccountId: 'other',
+          isRefund: amount < 0 || chargeLooksLikeCredit(lines, i),
+        })
+        pendingMerchant = null
+        pendingAmount = null
+        continue
+      }
+      if (!pendingMerchant) {
+        pendingAmount = onlyAmt
+        continue
+      }
     }
 
     const inlineDate = extractDate(line)
@@ -729,6 +803,7 @@ function parseSectionedActivity(
       : currentDate
     if (!date) {
       pendingMerchant = null
+      pendingAmount = null
       continue
     }
 
@@ -745,9 +820,34 @@ function parseSectionedActivity(
       merchant = merchantOnLine
     }
 
-    pendingMerchant = null
+    // Prefer an orphan amount from the line above when this row’s amount looks
+    // like OCR junk (`S252`) but we already captured `124.29`.
+    let finalAmount = Math.abs(amount)
+    const amountTokenLooksWhole =
+      !/\d+\.\d{2}/.test(line) && !/\$\s*\d/.test(line)
+    if (
+      pendingAmount != null &&
+      isPlausibleMerchant(merchant ?? '') &&
+      pendingAmount >= 1 &&
+      pendingAmount < 50000 &&
+      (amountTokenLooksWhole || finalAmount < 1)
+    ) {
+      finalAmount = pendingAmount
+    }
 
-    if (!merchant || !isPlausibleMerchant(merchant)) continue
+    pendingMerchant = null
+    const usedPendingAmount = pendingAmount != null && finalAmount === pendingAmount
+    pendingAmount = usedPendingAmount ? null : pendingAmount
+
+    if (!merchant || !isPlausibleMerchant(merchant)) {
+      // Keep amount for the following payee line.
+      if (isAmountOnlyLine(line) || !merchantOnLine) {
+        pendingAmount = finalAmount
+      }
+      continue
+    }
+
+    if (!usedPendingAmount) pendingAmount = null
 
     const looksLikeRefund =
       amount < 0 ||
@@ -756,7 +856,7 @@ function parseSectionedActivity(
 
     rows.push({
       date,
-      amount: Math.abs(amount),
+      amount: finalAmount,
       merchant,
       suggestedCategoryId: suggestCategory(merchant),
       suggestedAccountId: 'other',

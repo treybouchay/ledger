@@ -187,6 +187,63 @@ export function findGreenCreditAnchors(
   return merged
 }
 
+/** Amex “Plan It” pill — muted blue under the amount (dark UI fill). */
+export function isPlanItBluePixel(r: number, g: number, b: number): boolean {
+  // Badge fill ~50,59,91 — blue leads; must NOT match white amount glyphs
+  // (~243,250,255) or navy chrome (~17,27,62).
+  const blueLead = b - (r + g) / 2
+  return (
+    b > 75 &&
+    b < 130 &&
+    blueLead > 15 &&
+    b > r + 20 &&
+    b > g + 10 &&
+    r < 90 &&
+    g < 100
+  )
+}
+
+/**
+ * Paint Plan It badges with nearby background so they don’t OCR as “Pending”
+ * or chew the `$` off the amount above (`$124.29` → `S252` / `Slr`).
+ */
+export function maskPlanItBadges(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+): void {
+  const mask = new Uint8Array(width * height)
+  const x0 = Math.floor(width * 0.45)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = x0; x < width; x += 1) {
+      const i = (y * width + x) * 4
+      if (isPlanItBluePixel(data[i], data[i + 1], data[i + 2])) {
+        mask[y * width + x] = 1
+      }
+    }
+  }
+  const closed = closeBinaryMask(mask, width, height, 1)
+  // Sample a dark navy from the left gutter as fill.
+  let br = 17
+  let bg = 27
+  let bb = 62
+  const midY = Math.floor(height / 2)
+  const sampleX = Math.min(24, width - 1)
+  const si = (midY * width + sampleX) * 4
+  if (data[si] + data[si + 1] + data[si + 2] < 200) {
+    br = data[si]
+    bg = data[si + 1]
+    bb = data[si + 2]
+  }
+  for (let p = 0; p < closed.length; p += 1) {
+    if (!closed[p]) continue
+    const i = p * 4
+    data[i] = br
+    data[i + 1] = bg
+    data[i + 2] = bb
+  }
+}
+
 /** Draw a thick horizontal minus into grayscale ImageData. */
 export function inkMinusAt(
   data: Uint8ClampedArray,
@@ -315,8 +372,13 @@ export function processImageDataForOcr(imageData: ImageData): void {
 export function prepareImageDataForOcr(color: ImageData): ImageData {
   const { width, height } = color
   const colorCopy = new Uint8ClampedArray(color.data)
+  maskPlanItBadges(colorCopy, width, height)
+  // Keep amount glyphs punchy on the right (Plan It sits under them).
+  boostRightColumnAmountInk(colorCopy, width, height)
+  // Keep the canvas buffer in sync for grayscale + credit minus inking.
+  color.data.set(colorCopy)
   const gray = {
-    data: new Uint8ClampedArray(color.data),
+    data: new Uint8ClampedArray(colorCopy),
     width,
     height,
   } as ImageData
@@ -327,6 +389,31 @@ export function prepareImageDataForOcr(color: ImageData): ImageData {
     inkMinusAt(gray.data, width, height, a.x, a.y)
   }
   return gray
+}
+
+/**
+ * Force near-white amount digits on the right third to pure white so invert
+ * yields clean black `$100.00` instead of Plan It mush (`Slr`).
+ */
+function boostRightColumnAmountInk(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+): void {
+  const x0 = Math.floor(width * 0.58)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = x0; x < width; x += 1) {
+      const i = (y * width + x) * 4
+      const r = data[i]
+      const g = data[i + 1]
+      const b = data[i + 2]
+      if (isPlanItBluePixel(r, g, b)) continue
+      const yLuma = 0.299 * r + 0.587 * g + 0.114 * b
+      if (yLuma >= 170) {
+        data[i] = data[i + 1] = data[i + 2] = 255
+      }
+    }
+  }
 }
 
 async function prepareImageForOcr(file: File | Blob): Promise<Blob> {

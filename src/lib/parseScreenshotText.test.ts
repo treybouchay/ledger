@@ -624,19 +624,74 @@ GOOD EARTH COFFEEHOUSE OSHAWA
 $4.07
 PETRO-CANADA 65036 WHITBY
 $78.63
+SP LUMIQOUR WEST HARTFORD
+$100.00
+Plan It
 `
   const rows = parseScreenshotText(amexPlanItPlaystation)
   assert.equal(
     rows.length,
-    6,
-    `expected 6 charges incl PlayStation, got ${rows.length}: ${rows.map((r) => r.merchant).join(', ')}`,
+    7,
+    `expected 7 charges incl PlayStation + Lumiqour, got ${rows.length}: ${rows.map((r) => r.merchant).join(', ')}`,
   )
   const ps = rows.find((r) => /playstation/i.test(r.merchant))
   assert.ok(ps, 'PLAYSTATION with Plan It badge must import')
   assert.equal(ps!.amount, 124.29)
   assert.equal(ps!.date, '2026-08-13')
   assert.ok(!/plan\s*it/i.test(ps!.merchant), 'Plan It badge must not stick to payee')
+  const tim = rows.find((r) => /tim\s*hort/i.test(r.merchant))
+  assert.ok(tim)
+  assert.equal(tim!.amount, 13.31, 'store # must not strip $13.31 → $3.31')
+  const liquor = rows.find((r) => /lumiqour|lumiq/i.test(r.merchant))
+  assert.ok(liquor, 'SP LUMIQOUR with Plan It must import')
+  assert.equal(liquor!.amount, 100)
   assert.ok(!rows.some((r) => /plan\s*it/i.test(r.merchant)))
+}
+
+{
+  // Real OCR: amount above merchant + mangled S252 on the payee line.
+  const ocrSplitAmount = `
+SimplyCash Preferred Card
+13 Aug
+GOOD EARTH COFFEEHOUSE OSHAWA $8.31
+LM WHITBY WHITBY $26.18
+124.29
+PLAYSTATION 877-971-7669 S
+Plan It
+TIM HORTONS #2616 WHITBY $13.31
+12 Aug
+GOOD EARTH COFFEEHOUSE OSHAWA $4.07
+PETRO-CANADA 65036 WHITBY $78.63
+SP LUMIQOUR WEST HARTFORD S100.00
+Plan It
+`
+  const rows = parseScreenshotText(ocrSplitAmount)
+  const ps = rows.find((r) => /playstation/i.test(r.merchant))
+  assert.ok(ps, `PlayStation from amount-above-merchant OCR, got ${rows.map((r) => r.merchant+':'+r.amount).join(', ')}`)
+  assert.equal(ps!.amount, 124.29)
+  const liquor = rows.find((r) => /lumiqour/i.test(r.merchant))
+  assert.ok(liquor)
+  assert.equal(liquor!.amount, 100)
+  const tim = rows.find((r) => /tim\s*hort/i.test(r.merchant))
+  assert.equal(tim?.amount, 13.31)
+}
+
+{
+  // Amount below payee (OCR split) + Plan It.
+  const amountBelow = `
+SimplyCash Preferred Card
+12 Aug
+PETRO-CANADA 65036 WHITBY $78.63
+SP LUMIQOUR WEST HARTFORD
+$100.00
+Plan It
+`
+  const below = parseScreenshotText(amountBelow)
+  const liquor2 = below.find((r) => /lumiqour/i.test(r.merchant))
+  assert.ok(liquor2, `expected Lumiqour from amount-below, got ${below.map((r) => r.merchant+':'+r.amount).join(', ')}`)
+  assert.equal(liquor2!.amount, 100)
+  const petro = below.find((r) => /petro/i.test(r.merchant))
+  assert.equal(petro?.amount, 78.63)
 }
 
 {
