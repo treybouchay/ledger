@@ -301,11 +301,30 @@ export function CloudSyncPanel({
     setMessage(null)
     try {
       const backup = buildLiveBackup()
-      const { filesUploaded } = await migrateDeviceToCloud(
+      if (backup.transactions.length === 0) {
+        const ok = window.confirm(
+          'This browser has 0 transactions. Uploading would wipe the cloud ledger if it has data.\n\nOnly continue if you really mean to clear the cloud copy.',
+        )
+        if (!ok) {
+          setBusy(false)
+          return
+        }
+      }
+      const { filesUploaded, refusedEmptyOverwrite } = await migrateDeviceToCloud(
         cloud.householdId,
         backup,
-        { snapshot: true },
+        {
+          snapshot: true,
+          allowEmptyOverwrite: backup.transactions.length === 0,
+        },
       )
+      if (refusedEmptyOverwrite) {
+        setMessage(
+          'Upload blocked: cloud still has transactions and this browser is empty. Download from cloud first, or confirm a wipe.',
+        )
+        setBusy(false)
+        return
+      }
       setCloudEmpty(false)
       setLastSavedAt(getLastCloudSavedAt())
       await refreshSnapshots(cloud.householdId)
@@ -349,7 +368,26 @@ export function CloudSyncPanel({
     setMessage(null)
     try {
       const backup = buildLiveBackup()
-      await migrateDeviceToCloud(cloud.householdId, backup, { snapshot: true })
+      if (backup.transactions.length === 0) {
+        const ok = window.confirm(
+          'This browser has 0 transactions. Saving would wipe the cloud ledger if it has data.\n\nOnly continue if you really mean to clear the cloud copy.',
+        )
+        if (!ok) {
+          setBusy(false)
+          return
+        }
+      }
+      const result = await migrateDeviceToCloud(cloud.householdId, backup, {
+        snapshot: true,
+        allowEmptyOverwrite: backup.transactions.length === 0,
+      })
+      if (result.refusedEmptyOverwrite) {
+        setMessage(
+          'Save blocked: cloud still has transactions and this browser is empty. Download from cloud first.',
+        )
+        setBusy(false)
+        return
+      }
       setCloudEmpty(false)
       setLastSavedAt(getLastCloudSavedAt())
       await refreshSnapshots(cloud.householdId)

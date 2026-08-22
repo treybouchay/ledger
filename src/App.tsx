@@ -536,9 +536,10 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Debounced auto-save to cloud while signed in
+  // Debounced auto-save to cloud while signed in (never auto-push an empty wipe)
   useEffect(() => {
     if (!cloudContext) return
+    if (transactions.length === 0) return
     if (cloudPushTimerRef.current != null) {
       window.clearTimeout(cloudPushTimerRef.current)
     }
@@ -2055,7 +2056,7 @@ export default function App() {
             <div className="empty-guide">
               <p>
                 {transactions.length === 0
-                  ? 'No charges yet. Upload a statement or log an expense to see spending here.'
+                  ? 'No charges in this browser. August data lives per site/port — try Settings → Sync → Download from cloud, open the live ledger app, or restore a JSON backup from Downloads.'
                   : `No charges in ${monthLabel(monthId)} yet. Pick another month, or add activity for this one.`}
               </p>
               {alternateMonthsWithCharges.length > 0 ? (
@@ -2089,6 +2090,14 @@ export default function App() {
                   >
                     Switch to {monthLabel(latestActivityMonthId)}
                   </button>
+                ) : transactions.length === 0 ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => setTab('settings')}
+                  >
+                    Sync / restore
+                  </button>
                 ) : (
                   <button
                     type="button"
@@ -2101,9 +2110,11 @@ export default function App() {
                 <button
                   type="button"
                   className="ghost"
-                  onClick={() => setTab('log')}
+                  onClick={() =>
+                    setTab(transactions.length === 0 ? 'upload' : 'log')
+                  }
                 >
-                  Log expense
+                  {transactions.length === 0 ? 'Import charges' : 'Log expense'}
                 </button>
               </div>
             </div>

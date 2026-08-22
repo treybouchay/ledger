@@ -279,10 +279,18 @@ export function collectActivityMonthIds(
   return [...ids].sort()
 }
 
+/** Calendar YYYY-MM for “today” (browser local timezone). */
+export function calendarMonthId(now = new Date()): string {
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  return `${y}-${m}`
+}
+
 /**
  * Prefer a remembered month only if it still has activity. Otherwise jump to
  * the latest month with transactions or imported statements — never strand the
- * user on the hardcoded sheet month (June) while August data exists.
+ * user on a stale seed month while newer data exists. With no activity yet,
+ * prefer the current calendar month over the hardcoded seed fallback.
  */
 export function pickInitialMonthId(
   transactions: Transaction[],
@@ -294,6 +302,8 @@ export function pickInitialMonthId(
   if (stored && months.includes(stored)) return stored
   if (months.length > 0) return months[months.length - 1]
   if (stored) return stored
+  const calendar = calendarMonthId()
+  if (/^\d{4}-\d{2}$/.test(calendar)) return calendar
   return fallback
 }
 

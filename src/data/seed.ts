@@ -476,5 +476,5 @@ export const SEED_TRANSACTIONS: Transaction[] = [
   },
 ]
 
-export const ACTIVE_MONTH_ID = '2026-06'
-export const ACTIVE_MONTH_LABEL = 'June 2026'
+export const ACTIVE_MONTH_ID = '2026-08'
+export const ACTIVE_MONTH_LABEL = 'August 2026'

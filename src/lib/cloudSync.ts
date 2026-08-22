@@ -1108,12 +1108,18 @@ export async function restoreLedgerSnapshot(
   return backup
 }
 
-/** Upload everything on this device to the cloud. */
+/**
+ * Upload everything on this device to the cloud.
+ *
+ * Refuses to replace a non-empty cloud ledger with an empty local one unless
+ * `allowEmptyOverwrite` is set — protects against auto-save / wrong-port
+ * browsers wiping August (etc.) after a fresh localhost origin.
+ */
 export async function migrateDeviceToCloud(
   householdId: string,
   backup?: HouseholdBackup,
-  options?: { snapshot?: boolean },
-): Promise<{ filesUploaded: number }> {
+  options?: { snapshot?: boolean; allowEmptyOverwrite?: boolean },
+): Promise<{ filesUploaded: number; refusedEmptyOverwrite?: boolean }> {
   const payload =
     backup ??
     buildBackup({
@@ -1126,6 +1132,20 @@ export async function migrateDeviceToCloud(
   payload.customAccounts = getCustomAccounts()
   payload.budgetOverrides = getBudgetOverrides()
   payload.incomes = getIncomeOverrides()
+
+  if (
+    payload.transactions.length === 0 &&
+    !options?.allowEmptyOverwrite
+  ) {
+    const cloud = await fetchCloudBackup(householdId)
+    if (cloud && cloud.transactions.length > 0) {
+      console.warn(
+        '[cloud] Refused empty overwrite of cloud ledger',
+        `(cloud has ${cloud.transactions.length} transactions)`,
+      )
+      return { filesUploaded: 0, refusedEmptyOverwrite: true }
+    }
+  }
 
   await pushCloudBackup(householdId, payload)
   const filesUploaded = await uploadStatementFilesFromDevice(
