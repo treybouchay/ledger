@@ -5,6 +5,7 @@ const TABS = [
   'transactions',
   'log',
   'upload',
+  'activity',
   'learning',
   'gear',
   'settings',
@@ -12,7 +13,12 @@ const TABS = [
 
 export type AppTab = (typeof TABS)[number]
 
-export type SideNavId = 'budgeting' | 'learning' | 'gear' | 'settings'
+export type SideNavId =
+  | 'budgeting'
+  | 'activity'
+  | 'learning'
+  | 'gear'
+  | 'settings'
 
 /** Horizontal tabs shown while Budgeting is selected in the side rail. */
 export const BUDGETING_TABS = [
@@ -26,6 +32,7 @@ export const BUDGETING_TABS = [
 
 export const SIDE_NAV_ITEMS = [
   ['budgeting', 'Budgeting'],
+  ['activity', 'Activity'],
   ['learning', 'Learning'],
   ['gear', 'Gear flips'],
   ['settings', 'Settings'],
@@ -48,6 +55,7 @@ function isGearSubTab(value: string): value is GearSubTab {
 }
 
 export function sideNavForTab(tab: AppTab): SideNavId {
+  if (tab === 'activity') return 'activity'
   if (tab === 'learning') return 'learning'
   if (tab === 'gear') return 'gear'
   if (tab === 'settings') return 'settings'
@@ -60,6 +68,8 @@ export function isBudgetingTab(tab: AppTab): boolean {
 
 export function defaultTabForSide(side: SideNavId): AppTab {
   switch (side) {
+    case 'activity':
+      return 'activity'
     case 'learning':
       return 'learning'
     case 'gear':

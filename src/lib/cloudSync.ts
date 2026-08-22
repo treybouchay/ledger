@@ -613,6 +613,9 @@ export function buildBackupFromModules(input?: Parameters<typeof buildBackup>[0]
 const SNAPSHOT_KEEP = 10
 const LAST_SAVED_KEY = 'household-ledger.cloud-last-saved.v1'
 const LAST_DOWNLOADED_KEY = 'household-ledger.cloud-last-downloaded.v1'
+const DISMISSED_REMOTE_KEY = 'household-ledger.cloud-dismissed-remote.v1'
+/** Ignore cloud clocks within this window of local save/download marks. */
+const REMOTE_NEWER_SKEW_MS = 8_000
 
 export interface CloudSnapshotMeta {
   id: string
@@ -676,6 +679,137 @@ function shortDeviceLabel(): string {
   if (/Windows/i.test(ua)) return 'Windows'
   if (/Linux/i.test(ua)) return 'Linux'
   return 'Browser'
+}
+
+/** Human label for this browser (matches snapshot `device_label`). */
+export function thisDeviceLabel(): string {
+  return shortDeviceLabel()
+}
+
+function maxIso(...values: Array<string | null | undefined>): string | null {
+  let best: string | null = null
+  let bestMs = Number.NEGATIVE_INFINITY
+  for (const value of values) {
+    if (!value) continue
+    const ms = Date.parse(value)
+    if (!Number.isFinite(ms)) continue
+    if (ms >= bestMs) {
+      bestMs = ms
+      best = value
+    }
+  }
+  return best
+}
+
+/** Latest local save or download watermark for this device. */
+export function localCloudSyncWatermark(): string | null {
+  return maxIso(getLastCloudSavedAt(), getLastCloudDownloadedAt())
+}
+
+export function getDismissedRemoteRevision(): string | null {
+  try {
+    return localStorage.getItem(DISMISSED_REMOTE_KEY)
+  } catch {
+    return null
+  }
+}
+
+/** Hide the remote-newer banner until cloud moves past this revision. */
+export function dismissRemoteRevision(iso: string): void {
+  try {
+    localStorage.setItem(DISMISSED_REMOTE_KEY, iso)
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * True when the cloud ledger is newer than this device’s last save/download.
+ * Because this device always stamps a watermark after push/pull, a newer cloud
+ * copy implies another device (or browser) wrote it.
+ */
+export function isCloudRemoteNewer(
+  cloudUpdatedAt: string | null | undefined,
+  options?: { dismissedAt?: string | null; skewMs?: number },
+): boolean {
+  if (!cloudUpdatedAt) return false
+  const cloudMs = Date.parse(cloudUpdatedAt)
+  if (!Number.isFinite(cloudMs)) return false
+
+  const dismissed = options?.dismissedAt ?? getDismissedRemoteRevision()
+  if (dismissed) {
+    const dismissedMs = Date.parse(dismissed)
+    if (Number.isFinite(dismissedMs) && cloudMs <= dismissedMs) return false
+  }
+
+  const local = localCloudSyncWatermark()
+  if (!local) return true
+  const localMs = Date.parse(local)
+  if (!Number.isFinite(localMs)) return true
+  const skew = options?.skewMs ?? REMOTE_NEWER_SKEW_MS
+  return cloudMs > localMs + skew
+}
+
+export interface CloudRemoteStatus {
+  /** Best-effort “cloud last written” timestamp. */
+  cloudUpdatedAt: string | null
+  latestSnapshot: CloudSnapshotMeta | null
+  /** Cloud is ahead of this device’s watermark (and not dismissed). */
+  isRemoteNewer: boolean
+  /** Latest snapshot looks like it came from another device/account. */
+  isDifferentDevice: boolean
+}
+
+/**
+ * Lightweight remote check for the top sync banner + activity panel.
+ * Uses gear_state.updated_at (every push) plus latest snapshot identity.
+ */
+export async function fetchCloudRemoteStatus(
+  householdId: string,
+): Promise<CloudRemoteStatus> {
+  const snapshots = await listLedgerSnapshots(householdId)
+  const latestSnapshot = snapshots[0] ?? null
+  let cloudUpdatedAt: string | null = latestSnapshot?.createdAt ?? null
+
+  const sb = getSupabase()
+  if (sb) {
+    const [gearRes, impRes] = await Promise.all([
+      sb
+        .from('gear_state')
+        .select('updated_at')
+        .eq('household_id', householdId)
+        .maybeSingle(),
+      sb
+        .from('statement_imports')
+        .select('updated_at')
+        .eq('household_id', householdId)
+        .order('updated_at', { ascending: false })
+        .limit(1),
+    ])
+    if (!gearRes.error && gearRes.data?.updated_at) {
+      cloudUpdatedAt = maxIso(cloudUpdatedAt, String(gearRes.data.updated_at))
+    }
+    const impUpdated = impRes.data?.[0]?.updated_at
+    if (!impRes.error && impUpdated) {
+      cloudUpdatedAt = maxIso(cloudUpdatedAt, String(impUpdated))
+    }
+  }
+
+  const thisDevice = thisDeviceLabel()
+  const isDifferentDevice = latestSnapshot
+    ? Boolean(
+        (latestSnapshot.deviceLabel &&
+          latestSnapshot.deviceLabel !== thisDevice) ||
+          !latestSnapshot.isCurrentUser,
+      )
+    : isCloudRemoteNewer(cloudUpdatedAt)
+
+  return {
+    cloudUpdatedAt,
+    latestSnapshot,
+    isRemoteNewer: isCloudRemoteNewer(cloudUpdatedAt),
+    isDifferentDevice,
+  }
 }
 
 /** Map stored snapshot device labels to phone vs desktop for UI icons. */

@@ -49,6 +49,15 @@ function IconBudgeting(props: IconProps) {
   )
 }
 
+function IconActivity(props: IconProps) {
+  return (
+    <NavIcon {...props}>
+      <path d="M6.4 10.2a5.6 5.6 0 0 1 11.2 0c0 3.15 1.15 4.35 1.15 4.35H5.25S6.4 13.35 6.4 10.2Z" />
+      <path d="M10.15 17.35a1.85 1.85 0 0 0 3.7 0" />
+    </NavIcon>
+  )
+}
+
 function IconLearning(props: IconProps) {
   return (
     <NavIcon {...props}>
@@ -100,6 +109,7 @@ function IconExpand(props: IconProps) {
 
 const ICONS: Record<SideNavId, (props: IconProps) => ReactElement> = {
   budgeting: IconBudgeting,
+  activity: IconActivity,
   learning: IconLearning,
   gear: IconGearFlips,
   settings: IconSettings,

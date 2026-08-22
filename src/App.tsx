@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ActivityPanel } from './components/ActivityPanel'
 import { BootLoader } from './components/BootLoader'
 import {
   bootstrapCloudSession,
@@ -6,6 +7,7 @@ import {
 } from './components/CloudSyncPanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { GearFlipsPanel } from './components/GearFlipsPanel'
+import { RemoteSyncBanner } from './components/RemoteSyncBanner'
 import { ImportReviewQueue } from './components/ImportReviewQueue'
 import { LearningPanel } from './components/LearningPanel'
 import { LogExpenseForm } from './components/LogExpenseForm'
@@ -250,6 +252,7 @@ export default function App() {
   })
   const [gear, setGear] = useState<GearState>(() => loadGearState())
   const [cloudContext, setCloudContext] = useState<CloudContext | null>(null)
+  const [cloudSyncEpoch, setCloudSyncEpoch] = useState(0)
   const cloudPushTimerRef = useRef<number | null>(null)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const backupFileRef = useRef<HTMLInputElement>(null)
@@ -598,6 +601,7 @@ export default function App() {
         backup.imports,
       ),
     )
+    setCloudSyncEpoch((n) => n + 1)
     if (repaired.repairedCount > 0) {
       saveTransactions(repaired.transactions)
       setStorageWarning(
@@ -1849,6 +1853,13 @@ export default function App() {
         </h1>
         <p className="hello-saying">{financialSayingForToday()}</p>
       </header>
+
+      <RemoteSyncBanner
+        cloud={cloudContext}
+        syncEpoch={cloudSyncEpoch}
+        onPullApplied={applyCloudPull}
+        onOpenActivity={() => setTab('activity')}
+      />
 
       {statementUndo ? (
         <div className="statement-undo-toast" role="status">
@@ -3690,6 +3701,18 @@ export default function App() {
                 liveCounts={importLiveCounts}
               />
         </div>
+      )}
+
+      {tab === 'activity' && (
+        <ActivityPanel
+          cloud={cloudContext}
+          imports={imports}
+          transactions={transactions}
+          gear={gear}
+          monthId={monthId}
+          onOpenSettings={() => setTab('settings')}
+          onOpenGear={() => setTab('gear')}
+        />
       )}
 
       {tab === 'learning' && (
