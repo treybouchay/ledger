@@ -182,6 +182,30 @@ select {
   border-color: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
+.side-nav-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.side-nav-notify-dot {
+  position: absolute;
+  top: -0.15rem;
+  right: -0.2rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #fff 85%, var(--accent-soft));
+  pointer-events: none;
+}
+
+.side-nav-btn.has-notify-badge[aria-current='page'] .side-nav-notify-dot {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-soft) 55%, #fff);
+}
+
 .side-nav-label {
   font-size: 0.62rem;
   font-weight: 600;

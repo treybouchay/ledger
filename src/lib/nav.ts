@@ -32,7 +32,7 @@ export const BUDGETING_TABS = [
 
 export const SIDE_NAV_ITEMS = [
   ['budgeting', 'Budgeting'],
-  ['activity', 'Activity'],
+  ['activity', 'Notifications'],
   ['learning', 'Learning'],
   ['gear', 'Gear flips'],
   ['settings', 'Settings'],

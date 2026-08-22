@@ -206,10 +206,10 @@ export function ActivityPanel({
     <div className="layout activity-layout">
       <div className="panel-header bare">
         <div>
-          <h2>Activity</h2>
+          <h2>Notifications</h2>
           <p>
-            Who uploaded last, which accounts picked up charges, and gear cash
-            made from flips
+            Recent cloud syncs, statement uploads, and gear cash from flips —
+            check here when another device may be ahead
           </p>
         </div>
       </div>
@@ -286,8 +286,8 @@ export function ActivityPanel({
 
         {feed.length === 0 ? (
           <p className="activity-empty muted">
-            Nothing to show yet. Import charges or save to cloud to fill this
-            feed.
+            Nothing here yet. After you sync or import, recent cloud uploads and
+            statement activity show up in this feed.
           </p>
         ) : (
           <ul className="activity-feed">

@@ -90,6 +90,7 @@ import { confirmRemove } from './lib/confirm'
 import {
   ensureHousehold,
   migrateDeviceToCloud,
+  pullCloudToDevice,
   type CloudContext,
 } from './lib/cloudSync'
 import { getSupabase, isSupabaseConfigured } from './lib/supabase'
@@ -253,6 +254,8 @@ export default function App() {
   const [gear, setGear] = useState<GearState>(() => loadGearState())
   const [cloudContext, setCloudContext] = useState<CloudContext | null>(null)
   const [cloudSyncEpoch, setCloudSyncEpoch] = useState(0)
+  const [cloudRemoteNewer, setCloudRemoteNewer] = useState(false)
+  const [emptySyncBusy, setEmptySyncBusy] = useState(false)
   const cloudPushTimerRef = useRef<number | null>(null)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const backupFileRef = useRef<HTMLInputElement>(null)
@@ -603,12 +606,33 @@ export default function App() {
       ),
     )
     setCloudSyncEpoch((n) => n + 1)
+    setCloudRemoteNewer(false)
     if (repaired.repairedCount > 0) {
       saveTransactions(repaired.transactions)
       setStorageWarning(
         `Corrected ${repaired.repairedCount} charge date${repaired.repairedCount === 1 ? '' : 's'} that had been set to the upload day.`,
       )
     }
+  }
+
+  async function syncWithCloudFromEmpty() {
+    if (!cloudContext) return
+    const ok = window.confirm(
+      'Replace this browser’s ledger with the cloud copy?\n\nLocal transactions, imports, gear, and rules will be overwritten.',
+    )
+    if (!ok) return
+    setEmptySyncBusy(true)
+    try {
+      const backup = await pullCloudToDevice(cloudContext.householdId)
+      if (!backup) {
+        setStorageWarning('Cloud ledger is empty — nothing to download.')
+      } else {
+        applyCloudPull(backup)
+      }
+    } catch (err) {
+      setStorageWarning(err instanceof Error ? err.message : 'Sync failed')
+    }
+    setEmptySyncBusy(false)
   }
 
   // Another tab wrote ledger keys — reload so we don't overwrite newer data.
@@ -645,10 +669,9 @@ export default function App() {
     return [...ids].sort().reverse()
   }, [transactions, imports, monthId])
 
-  const latestActivityMonthId = useMemo(() => {
-    const months = collectActivityMonthIds(transactions, imports)
-    return months.length > 0 ? months[months.length - 1] : null
-  }, [transactions, imports])
+  const preferCloudSyncFirst = Boolean(
+    cloudContext && (cloudRemoteNewer || transactions.length === 0),
+  )
 
   const monthTransactions = useMemo(
     () => transactions.filter((t) => t.monthId === monthId),
@@ -1804,13 +1827,19 @@ export default function App() {
           <span className="visually-hidden">Ledger</span>
         </div>
         <div className="side-nav-items">
-          {SIDE_NAV_ITEMS.map(([id, label]) => (
+          {SIDE_NAV_ITEMS.map(([id, label]) => {
+            const showNotifyBadge = id === 'activity' && cloudRemoteNewer
+            return (
             <button
               key={id}
               type="button"
-              className="side-nav-btn"
-              aria-label={label}
-              title={label}
+              className={`side-nav-btn${showNotifyBadge ? ' has-notify-badge' : ''}`}
+              aria-label={
+                showNotifyBadge ? `${label} — cloud has a newer copy` : label
+              }
+              title={
+                showNotifyBadge ? `${label} — cloud has a newer copy` : label
+              }
               aria-current={activeSide === id ? 'page' : undefined}
               onClick={() => {
                 if (id === 'budgeting') {
@@ -1824,10 +1853,16 @@ export default function App() {
                 setTab(defaultTabForSide(id as SideNavId))
               }}
             >
-              <SideNavIcon id={id} />
+              <span className="side-nav-icon-wrap">
+                <SideNavIcon id={id} />
+                {showNotifyBadge ? (
+                  <span className="side-nav-notify-dot" aria-hidden />
+                ) : null}
+              </span>
               <span className="side-nav-label">{label}</span>
             </button>
-          ))}
+            )
+          })}
         </div>
         <button
           type="button"
@@ -1860,6 +1895,7 @@ export default function App() {
         syncEpoch={cloudSyncEpoch}
         onPullApplied={applyCloudPull}
         onOpenActivity={() => setTab('activity')}
+        onRemoteNewerChange={setCloudRemoteNewer}
       />
 
       {statementUndo ? (
@@ -1931,7 +1967,9 @@ export default function App() {
           <p>
             {canRestoreSnapshot
               ? 'Nothing in memory, but a backup snapshot is still in this browser.'
-              : 'Nothing logged yet. Start by uploading a statement, or add a one-off expense — then assign categories in the review queue.'}
+              : preferCloudSyncFirst
+                ? 'This browser looks empty. Sync with cloud first so you don’t miss charges from another device — then import new statements if needed.'
+                : 'Nothing logged yet. Start by uploading a statement, or add a one-off expense — then assign categories in the review queue.'}
           </p>
           <div className="callout-actions">
             {canRestoreSnapshot ? (
@@ -1942,6 +1980,15 @@ export default function App() {
               >
                 Restore {snapshotCounts.transactionsLastGood || snapshotCounts.importsLastGood} from snapshot
               </button>
+            ) : preferCloudSyncFirst ? (
+              <button
+                type="button"
+                className="primary"
+                disabled={emptySyncBusy}
+                onClick={() => void syncWithCloudFromEmpty()}
+              >
+                Sync with cloud first
+              </button>
             ) : (
               <button
                 type="button"
@@ -1951,6 +1998,24 @@ export default function App() {
                 Import charges
               </button>
             )}
+            {preferCloudSyncFirst && !canRestoreSnapshot ? (
+              <>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setTab('activity')}
+                >
+                  Notifications
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setTab('upload')}
+                >
+                  Import after sync
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               className="ghost"
@@ -1958,7 +2023,7 @@ export default function App() {
             >
               Restore JSON backup
             </button>
-            {!canRestoreSnapshot ? (
+            {!canRestoreSnapshot && !preferCloudSyncFirst ? (
               <button
                 type="button"
                 className="ghost"
@@ -2056,8 +2121,12 @@ export default function App() {
             <div className="empty-guide">
               <p>
                 {transactions.length === 0
-                  ? 'No charges in this browser. August data lives per site/port — try Settings → Sync → Download from cloud, open the live ledger app, or restore a JSON backup from Downloads.'
-                  : `No charges in ${monthLabel(monthId)} yet. Pick another month, or add activity for this one.`}
+                  ? preferCloudSyncFirst
+                    ? 'No charges in this browser. Sync with cloud first before importing — localhost and the live app don’t share local storage.'
+                    : 'No charges in this browser. August data lives per site/port — try Settings → Sync → Download from cloud, open the live ledger app, or restore a JSON backup from Downloads.'
+                  : cloudRemoteNewer
+                    ? `No charges in ${monthLabel(monthId)} yet. Cloud has a newer copy — sync first so you don’t miss updates from another device.`
+                    : `No charges in ${monthLabel(monthId)} yet. Pick another month, or add activity for this one.`}
               </p>
               {alternateMonthsWithCharges.length > 0 ? (
                 <p className="empty-note">
@@ -2081,41 +2150,66 @@ export default function App() {
                 </p>
               ) : null}
               <div className="empty-guide-actions">
-                {latestActivityMonthId &&
-                latestActivityMonthId !== monthId ? (
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => setMonthId(latestActivityMonthId)}
-                  >
-                    Switch to {monthLabel(latestActivityMonthId)}
-                  </button>
+                {preferCloudSyncFirst ? (
+                  <>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={emptySyncBusy}
+                      onClick={() => void syncWithCloudFromEmpty()}
+                    >
+                      Sync with cloud first
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setTab('activity')}
+                    >
+                      Notifications
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setTab('upload')}
+                    >
+                      Import after sync
+                    </button>
+                  </>
                 ) : transactions.length === 0 ? (
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => setTab('settings')}
-                  >
-                    Sync / restore
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => setTab('settings')}
+                    >
+                      Sync / restore
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setTab('upload')}
+                    >
+                      Import charges
+                    </button>
+                  </>
                 ) : (
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => setTab('upload')}
-                  >
-                    Import charges
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => setTab('upload')}
+                    >
+                      Import charges
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setTab('log')}
+                    >
+                      Log expense
+                    </button>
+                  </>
                 )}
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() =>
-                    setTab(transactions.length === 0 ? 'upload' : 'log')
-                  }
-                >
-                  {transactions.length === 0 ? 'Import charges' : 'Log expense'}
-                </button>
               </div>
             </div>
           ) : null}
@@ -3085,8 +3179,12 @@ export default function App() {
             <div className="empty-guide">
               <p>
                 {transactions.length === 0
-                  ? 'No charges yet. Upload a statement or log an expense to see categories here.'
-                  : `No charges in ${monthLabel(monthId)}. Categories only show the selected month.`}
+                  ? preferCloudSyncFirst
+                    ? 'No charges yet. Sync with cloud first before importing so you pick up the shared ledger.'
+                    : 'No charges yet. Upload a statement or log an expense to see categories here.'
+                  : cloudRemoteNewer
+                    ? `No charges in ${monthLabel(monthId)}. Cloud has a newer copy — sync first, or switch the month picker above.`
+                    : `No charges in ${monthLabel(monthId)}. Categories only show the selected month.`}
               </p>
               {alternateMonthsWithCharges.length > 0 ||
               alternateMonthsWithStatements.length > 0 ? (
@@ -3103,15 +3201,31 @@ export default function App() {
                 </p>
               ) : null}
               <div className="empty-guide-actions">
-                {latestActivityMonthId &&
-                latestActivityMonthId !== monthId ? (
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => setMonthId(latestActivityMonthId)}
-                  >
-                    Switch to {monthLabel(latestActivityMonthId)}
-                  </button>
+                {preferCloudSyncFirst ? (
+                  <>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={emptySyncBusy}
+                      onClick={() => void syncWithCloudFromEmpty()}
+                    >
+                      Sync with cloud first
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setTab('activity')}
+                    >
+                      Notifications
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setTab('upload')}
+                    >
+                      Import after sync
+                    </button>
+                  </>
                 ) : (
                   <button
                     type="button"
@@ -3483,7 +3597,11 @@ export default function App() {
                 <div className="empty-guide">
                   <p>
                     {monthTransactions.length === 0
-                      ? `Nothing in ${monthLabel(monthId)} yet. Upload a statement or log an expense.`
+                      ? preferCloudSyncFirst
+                        ? transactions.length === 0
+                          ? 'Nothing in this browser yet. Sync with cloud first before importing charges.'
+                          : `Nothing in ${monthLabel(monthId)} yet. Cloud has a newer copy — sync first so you don’t miss updates.`
+                        : `Nothing in ${monthLabel(monthId)} yet. Upload a statement or log an expense.`
                       : 'No charges match these filters. Try another person or category, or clear the category filter.'}
                   </p>
                   {monthTransactions.length === 0 &&
@@ -3503,17 +3621,33 @@ export default function App() {
                   ) : null}
                   <div className="empty-guide-actions">
                     {monthTransactions.length === 0 ? (
-                      <>
-                        {latestActivityMonthId &&
-                        latestActivityMonthId !== monthId ? (
+                      preferCloudSyncFirst ? (
+                        <>
                           <button
                             type="button"
                             className="primary"
-                            onClick={() => setMonthId(latestActivityMonthId)}
+                            disabled={emptySyncBusy}
+                            onClick={() => void syncWithCloudFromEmpty()}
                           >
-                            Switch to {monthLabel(latestActivityMonthId)}
+                            Sync with cloud first
                           </button>
-                        ) : (
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => setTab('activity')}
+                          >
+                            Notifications
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => setTab('upload')}
+                          >
+                            Import after sync
+                          </button>
+                        </>
+                      ) : (
+                        <>
                           <button
                             type="button"
                             className="primary"
@@ -3521,15 +3655,15 @@ export default function App() {
                           >
                             Import charges
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => setTab('log')}
-                        >
-                          Log expense
-                        </button>
-                      </>
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => setTab('log')}
+                          >
+                            Log expense
+                          </button>
+                        </>
+                      )
                     ) : (
                       <button
                         type="button"

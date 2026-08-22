@@ -30,12 +30,15 @@ export function RemoteSyncBanner({
   syncEpoch = 0,
   onPullApplied,
   onOpenActivity,
+  onRemoteNewerChange,
 }: {
   cloud: CloudContext | null
   /** Bump after local pull/save so the banner re-checks immediately. */
   syncEpoch?: number
   onPullApplied: (backup: HouseholdBackup) => void
   onOpenActivity: () => void
+  /** Lets the shell show a nav badge / sync-first empty states. */
+  onRemoteNewerChange?: (isNewer: boolean) => void
 }) {
   const [status, setStatus] = useState<CloudRemoteStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -50,16 +53,18 @@ export function RemoteSyncBanner({
       const next = await fetchCloudRemoteStatus(cloud.householdId)
       setStatus(next)
       setError(null)
+      onRemoteNewerChange?.(Boolean(next.isRemoteNewer))
     } catch (err) {
       console.warn('[cloud] remote status check failed', err)
     } finally {
       checkingRef.current = false
     }
-  }, [cloud])
+  }, [cloud, onRemoteNewerChange])
 
   useEffect(() => {
     if (!cloud) {
       setStatus(null)
+      onRemoteNewerChange?.(false)
       return
     }
     void refresh()
@@ -79,7 +84,7 @@ export function RemoteSyncBanner({
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onFocus)
     }
-  }, [cloud, refresh, dismissedTick, syncEpoch])
+  }, [cloud, refresh, dismissedTick, syncEpoch, onRemoteNewerChange])
 
   if (!cloud || !status?.isRemoteNewer) return null
 
@@ -158,7 +163,8 @@ export function RemoteSyncBanner({
             )}
             {when ? <> · {when}</> : null}.
           </span>{' '}
-          Sync with the cloud to make sure this browser has the latest ledger.
+          Sync before importing charges so you don’t overwrite or miss work from
+          another device.
           {snap
             ? ` (${snap.transactionCount} charges · ${snap.importCount} statements)`
             : ''}
@@ -173,7 +179,7 @@ export function RemoteSyncBanner({
           onClick={() => void handleSync()}
         >
           <SyncCloudArrowIcon direction="down" className="sync-btn-icon" />
-          Sync with cloud
+          Sync with cloud first
         </button>
         <button
           type="button"
@@ -181,7 +187,7 @@ export function RemoteSyncBanner({
           disabled={busy}
           onClick={onOpenActivity}
         >
-          Activity
+          Notifications
         </button>
         <button
           type="button"
