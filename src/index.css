@@ -479,6 +479,22 @@ select {
   color: var(--accent);
 }
 
+.remote-sync-banner-quiet {
+  padding: 0.7rem 1rem;
+  background: color-mix(in srgb, var(--accent-soft) 28%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.remote-sync-banner-quiet .remote-sync-banner-lead {
+  color: var(--good);
+  font-weight: 600;
+}
+
+.callout.ok {
+  background: color-mix(in srgb, var(--accent-soft) 35%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--good) 18%, transparent);
+}
+
 .activity-layout {
   gap: 1rem;
 }

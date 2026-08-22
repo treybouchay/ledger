@@ -614,8 +614,53 @@ const SNAPSHOT_KEEP = 10
 const LAST_SAVED_KEY = 'household-ledger.cloud-last-saved.v1'
 const LAST_DOWNLOADED_KEY = 'household-ledger.cloud-last-downloaded.v1'
 const DISMISSED_REMOTE_KEY = 'household-ledger.cloud-dismissed-remote.v1'
+const LOCAL_DIRTY_KEY = 'household-ledger.cloud-local-dirty.v1'
 /** Ignore cloud clocks within this window of local save/download marks. */
 const REMOTE_NEWER_SKEW_MS = 8_000
+
+/** How this device’s ledger relates to the shared cloud copy. */
+export type CloudSyncRelation =
+  | 'up_to_date'
+  | 'local_ahead'
+  | 'remote_ahead'
+  | 'diverged'
+
+export function deriveCloudSyncRelation(
+  isRemoteNewer: boolean,
+  isLocalDirty: boolean,
+): CloudSyncRelation {
+  if (isRemoteNewer && isLocalDirty) return 'diverged'
+  if (isRemoteNewer) return 'remote_ahead'
+  if (isLocalDirty) return 'local_ahead'
+  return 'up_to_date'
+}
+
+export function isLocalCloudDirty(): boolean {
+  try {
+    return localStorage.getItem(LOCAL_DIRTY_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Mark local ledger as needing an upload. Returns true when newly dirtied. */
+export function markLocalCloudDirty(): boolean {
+  if (isLocalCloudDirty()) return false
+  try {
+    localStorage.setItem(LOCAL_DIRTY_KEY, '1')
+  } catch {
+    /* ignore */
+  }
+  return true
+}
+
+export function clearLocalCloudDirty(): void {
+  try {
+    localStorage.removeItem(LOCAL_DIRTY_KEY)
+  } catch {
+    /* ignore */
+  }
+}
 
 export interface CloudSnapshotMeta {
   id: string
@@ -657,6 +702,7 @@ export function markCloudSavedNow(): string {
   } catch {
     /* ignore */
   }
+  clearLocalCloudDirty()
   return iso
 }
 
@@ -667,6 +713,7 @@ export function markCloudDownloadedNow(): string {
   } catch {
     /* ignore */
   }
+  clearLocalCloudDirty()
   return iso
 }
 
@@ -756,6 +803,10 @@ export interface CloudRemoteStatus {
   latestSnapshot: CloudSnapshotMeta | null
   /** Cloud is ahead of this device’s watermark (and not dismissed). */
   isRemoteNewer: boolean
+  /** Local ledger changed since last successful push/pull. */
+  isLocalDirty: boolean
+  /** Combined sync relation for banners / badges. */
+  relation: CloudSyncRelation
   /** Latest snapshot looks like it came from another device/account. */
   isDifferentDevice: boolean
 }
@@ -796,18 +847,22 @@ export async function fetchCloudRemoteStatus(
   }
 
   const thisDevice = thisDeviceLabel()
+  const isRemoteNewer = isCloudRemoteNewer(cloudUpdatedAt)
+  const isLocalDirty = isLocalCloudDirty()
   const isDifferentDevice = latestSnapshot
     ? Boolean(
         (latestSnapshot.deviceLabel &&
           latestSnapshot.deviceLabel !== thisDevice) ||
           !latestSnapshot.isCurrentUser,
       )
-    : isCloudRemoteNewer(cloudUpdatedAt)
+    : isRemoteNewer
 
   return {
     cloudUpdatedAt,
     latestSnapshot,
-    isRemoteNewer: isCloudRemoteNewer(cloudUpdatedAt),
+    isRemoteNewer,
+    isLocalDirty,
+    relation: deriveCloudSyncRelation(isRemoteNewer, isLocalDirty),
     isDifferentDevice,
   }
 }

@@ -160,11 +160,14 @@ export function CloudSyncPanel({
   cloud,
   onCloudChange,
   onPullApplied,
+  onSynced,
   buildLiveBackup,
 }: {
   cloud: CloudContext | null
   onCloudChange: (ctx: CloudContext | null) => void
   onPullApplied: (backup: HouseholdBackup) => void
+  /** Bump shell sync status after Settings push/pull/restore. */
+  onSynced?: () => void
   buildLiveBackup: () => HouseholdBackup
 }) {
   const [email, setEmail] = useState('')
@@ -328,6 +331,7 @@ export function CloudSyncPanel({
       setCloudEmpty(false)
       setLastSavedAt(getLastCloudSavedAt())
       await refreshSnapshots(cloud.householdId)
+      onSynced?.()
       setMessage(
         `Uploaded to cloud: ${backup.transactions.length} transactions, ${backup.imports.length} imports, ${filesUploaded} statement file${filesUploaded === 1 ? '' : 's'}. Snapshot saved.`,
       )
@@ -352,6 +356,7 @@ export function CloudSyncPanel({
       } else {
         onPullApplied(backup)
         setLastDownloadedAt(getLastCloudDownloadedAt())
+        onSynced?.()
         setMessage(
           `Downloaded from cloud: ${backup.transactions.length} transactions, ${backup.imports.length} imports.`,
         )
@@ -391,6 +396,7 @@ export function CloudSyncPanel({
       setCloudEmpty(false)
       setLastSavedAt(getLastCloudSavedAt())
       await refreshSnapshots(cloud.householdId)
+      onSynced?.()
       setMessage('Saved to cloud (and snapshot stored in history).')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Sync failed')
@@ -421,6 +427,7 @@ export function CloudSyncPanel({
         setLastSavedAt(getLastCloudSavedAt())
         await refreshSnapshots(cloud.householdId)
       }
+      onSynced?.()
       setMessage(
         pushAsCurrent
           ? `Restored snapshot and set it as current cloud (${backup.transactions.length} tx).`

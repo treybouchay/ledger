@@ -89,7 +89,11 @@ import {
 import { confirmRemove } from './lib/confirm'
 import {
   ensureHousehold,
+  markLocalCloudDirty,
   migrateDeviceToCloud,
+  fetchCloudRemoteStatus,
+  isLocalCloudDirty,
+  type CloudSyncRelation,
   pullCloudToDevice,
   type CloudContext,
 } from './lib/cloudSync'
@@ -254,9 +258,21 @@ export default function App() {
   const [gear, setGear] = useState<GearState>(() => loadGearState())
   const [cloudContext, setCloudContext] = useState<CloudContext | null>(null)
   const [cloudSyncEpoch, setCloudSyncEpoch] = useState(0)
-  const [cloudRemoteNewer, setCloudRemoteNewer] = useState(false)
+  const [cloudSyncRelation, setCloudSyncRelation] =
+    useState<CloudSyncRelation>('up_to_date')
   const [emptySyncBusy, setEmptySyncBusy] = useState(false)
   const cloudPushTimerRef = useRef<number | null>(null)
+  const skipCloudDirtyMarkRef = useRef(false)
+  const rulesDirtyReadyRef = useRef(false)
+  const gearDirtyReadyRef = useRef(false)
+  const customDirtyReadyRef = useRef(false)
+
+  function noteLocalCloudDirty() {
+    if (skipCloudDirtyMarkRef.current) return
+    if (markLocalCloudDirty()) {
+      setCloudSyncEpoch((n) => n + 1)
+    }
+  }
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const backupFileRef = useRef<HTMLInputElement>(null)
   const backupActionRef = useRef<'restore' | 'merge'>('restore')
@@ -433,6 +449,8 @@ export default function App() {
       setStorageWarning(
         `Could not save transactions (${result.error}). Download a backup now.`,
       )
+    } else if (result.ok) {
+      noteLocalCloudDirty()
     }
   }, [transactions])
 
@@ -475,16 +493,36 @@ export default function App() {
       setStorageWarning(
         `Could not save statements (${result.error}). Download a backup now.`,
       )
+    } else if (result.ok) {
+      noteLocalCloudDirty()
     }
   }, [imports])
 
   useEffect(() => {
     saveLearnedRules(learnedRules)
+    if (!rulesDirtyReadyRef.current) {
+      rulesDirtyReadyRef.current = true
+      return
+    }
+    noteLocalCloudDirty()
   }, [learnedRules])
 
   useEffect(() => {
     saveGearState(gear)
+    if (!gearDirtyReadyRef.current) {
+      gearDirtyReadyRef.current = true
+      return
+    }
+    noteLocalCloudDirty()
   }, [gear])
+
+  useEffect(() => {
+    if (!customDirtyReadyRef.current) {
+      customDirtyReadyRef.current = true
+      return
+    }
+    noteLocalCloudDirty()
+  }, [customBudgetTick, customCategories, customAccounts])
 
   useEffect(() => {
     writeAppTab(tab)
@@ -539,16 +577,30 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Debounced auto-save to cloud while signed in (never auto-push an empty wipe)
+  // Debounced auto-save to cloud while signed in (never auto-push an empty wipe,
+  // and never overwrite a newer cloud copy when this device also has local edits).
   useEffect(() => {
     if (!cloudContext) return
     if (transactions.length === 0) return
+    if (
+      cloudSyncRelation === 'remote_ahead' ||
+      cloudSyncRelation === 'diverged'
+    ) {
+      return
+    }
     if (cloudPushTimerRef.current != null) {
       window.clearTimeout(cloudPushTimerRef.current)
     }
     cloudPushTimerRef.current = window.setTimeout(() => {
       void (async () => {
         try {
+          if (!isLocalCloudDirty()) return
+          const remote = await fetchCloudRemoteStatus(cloudContext.householdId)
+          if (remote.isRemoteNewer) {
+            setCloudSyncRelation(remote.relation)
+            setCloudSyncEpoch((n) => n + 1)
+            return
+          }
           const backup = buildBackup({
             transactions,
             imports,
@@ -562,6 +614,7 @@ export default function App() {
           await migrateDeviceToCloud(cloudContext.householdId, backup, {
             snapshot: false,
           })
+          setCloudSyncEpoch((n) => n + 1)
         } catch (err) {
           console.error('[cloud] auto sync failed', err)
         }
@@ -574,6 +627,7 @@ export default function App() {
     }
   }, [
     cloudContext,
+    cloudSyncRelation,
     transactions,
     imports,
     learnedRules,
@@ -588,6 +642,7 @@ export default function App() {
       backup.transactions,
       backup.imports,
     )
+    skipCloudDirtyMarkRef.current = true
     skipNextTxPersistRef.current = true
     skipNextImportsPersistRef.current = true
     setTransactions(repaired.transactions)
@@ -606,13 +661,16 @@ export default function App() {
       ),
     )
     setCloudSyncEpoch((n) => n + 1)
-    setCloudRemoteNewer(false)
+    setCloudSyncRelation('up_to_date')
     if (repaired.repairedCount > 0) {
       saveTransactions(repaired.transactions)
       setStorageWarning(
         `Corrected ${repaired.repairedCount} charge date${repaired.repairedCount === 1 ? '' : 's'} that had been set to the upload day.`,
       )
     }
+    window.setTimeout(() => {
+      skipCloudDirtyMarkRef.current = false
+    }, 100)
   }
 
   async function syncWithCloudFromEmpty() {
@@ -669,8 +727,11 @@ export default function App() {
     return [...ids].sort().reverse()
   }, [transactions, imports, monthId])
 
+  const cloudNeedsAttention =
+    cloudSyncRelation === 'remote_ahead' || cloudSyncRelation === 'diverged'
+
   const preferCloudSyncFirst = Boolean(
-    cloudContext && (cloudRemoteNewer || transactions.length === 0),
+    cloudContext && (cloudNeedsAttention || transactions.length === 0),
   )
 
   const monthTransactions = useMemo(
@@ -1828,17 +1889,25 @@ export default function App() {
         </div>
         <div className="side-nav-items">
           {SIDE_NAV_ITEMS.map(([id, label]) => {
-            const showNotifyBadge = id === 'activity' && cloudRemoteNewer
+            const showNotifyBadge = id === 'activity' && cloudNeedsAttention
             return (
             <button
               key={id}
               type="button"
               className={`side-nav-btn${showNotifyBadge ? ' has-notify-badge' : ''}`}
               aria-label={
-                showNotifyBadge ? `${label} — cloud has a newer copy` : label
+                showNotifyBadge
+                  ? cloudSyncRelation === 'diverged'
+                    ? `${label} — this device and cloud both have newer changes`
+                    : `${label} — cloud has a newer copy`
+                  : label
               }
               title={
-                showNotifyBadge ? `${label} — cloud has a newer copy` : label
+                showNotifyBadge
+                  ? cloudSyncRelation === 'diverged'
+                    ? `${label} — this device and cloud both have newer changes`
+                    : `${label} — cloud has a newer copy`
+                  : label
               }
               aria-current={activeSide === id ? 'page' : undefined}
               onClick={() => {
@@ -1893,9 +1962,26 @@ export default function App() {
       <RemoteSyncBanner
         cloud={cloudContext}
         syncEpoch={cloudSyncEpoch}
+        buildLiveBackup={() => {
+          const backup = buildBackup({
+            transactions,
+            imports,
+            learnedRules,
+            gear,
+          })
+          backup.customCategories = getCustomCategories()
+          backup.customAccounts = getCustomAccounts()
+          backup.budgetOverrides = getBudgetOverrides()
+          backup.incomes = getIncomeOverrides()
+          return backup
+        }}
         onPullApplied={applyCloudPull}
+        onPushApplied={() => {
+          setCloudSyncEpoch((n) => n + 1)
+          setCloudSyncRelation('up_to_date')
+        }}
         onOpenActivity={() => setTab('activity')}
-        onRemoteNewerChange={setCloudRemoteNewer}
+        onSyncStatusChange={setCloudSyncRelation}
       />
 
       {statementUndo ? (
@@ -2124,7 +2210,7 @@ export default function App() {
                   ? preferCloudSyncFirst
                     ? 'No charges in this browser. Sync with cloud first before importing — localhost and the live app don’t share local storage.'
                     : 'No charges in this browser. August data lives per site/port — try Settings → Sync → Download from cloud, open the live ledger app, or restore a JSON backup from Downloads.'
-                  : cloudRemoteNewer
+                  : cloudNeedsAttention
                     ? `No charges in ${monthLabel(monthId)} yet. Cloud has a newer copy — sync first so you don’t miss updates from another device.`
                     : `No charges in ${monthLabel(monthId)} yet. Pick another month, or add activity for this one.`}
               </p>
@@ -3182,7 +3268,7 @@ export default function App() {
                   ? preferCloudSyncFirst
                     ? 'No charges yet. Sync with cloud first before importing so you pick up the shared ledger.'
                     : 'No charges yet. Upload a statement or log an expense to see categories here.'
-                  : cloudRemoteNewer
+                  : cloudNeedsAttention
                     ? `No charges in ${monthLabel(monthId)}. Cloud has a newer copy — sync first, or switch the month picker above.`
                     : `No charges in ${monthLabel(monthId)}. Categories only show the selected month.`}
               </p>
@@ -3892,6 +3978,7 @@ export default function App() {
             cloud={cloudContext}
             onCloudChange={setCloudContext}
             onPullApplied={applyCloudPull}
+            onSynced={() => setCloudSyncEpoch((n) => n + 1)}
             buildLiveBackup={() => {
               const backup = buildBackup({
                 transactions,
