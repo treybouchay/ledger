@@ -7,6 +7,7 @@ import {
 } from './components/CloudSyncPanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { GearFlipsPanel } from './components/GearFlipsPanel'
+import { DemoSyncPreviewPanel } from './components/DemoSyncPreviewPanel'
 import { RemoteSyncBanner } from './components/RemoteSyncBanner'
 import { ImportReviewQueue } from './components/ImportReviewQueue'
 import { LearningPanel } from './components/LearningPanel'
@@ -913,28 +914,6 @@ export default function App() {
     }
     return counts
   }, [transactions])
-
-  /** Charges from statements that touch this month but were dated in other months. */
-  const spilloverFromMonthImports = useMemo(() => {
-    const relatedImportIds = new Set(
-      imports
-        .filter((imp) => imp.monthIds.includes(monthId))
-        .map((imp) => imp.id),
-    )
-    if (relatedImportIds.size === 0) return [] as { monthId: string; count: number }[]
-    const otherMonthCounts = new Map<string, number>()
-    for (const t of transactions) {
-      if (!t.importId || !relatedImportIds.has(t.importId)) continue
-      if (t.monthId === monthId) continue
-      otherMonthCounts.set(
-        t.monthId,
-        (otherMonthCounts.get(t.monthId) ?? 0) + 1,
-      )
-    }
-    return [...otherMonthCounts.entries()]
-      .map(([id, count]) => ({ monthId: id, count }))
-      .sort((a, b) => b.monthId.localeCompare(a.monthId))
-  }, [imports, transactions, monthId])
 
   const seedCount = useMemo(
     () => transactions.filter((t) => t.source === 'seed').length,
@@ -2171,37 +2150,6 @@ export default function App() {
               </label>
             </div>
           </div>
-
-          {spilloverFromMonthImports.length > 0 ? (
-            <div className="callout">
-              <p>
-                This month’s statements also posted{' '}
-                {spilloverFromMonthImports.reduce((s, r) => s + r.count, 0)}{' '}
-                charge
-                {spilloverFromMonthImports.reduce((s, r) => s + r.count, 0) === 1
-                  ? ''
-                  : 's'}{' '}
-                in{' '}
-                {spilloverFromMonthImports
-                  .map((r) => `${monthLabel(r.monthId)} (${r.count})`)
-                  .join(', ')}
-                . Month overview only counts the selected month — open the
-                statement or switch months to see the rest.
-              </p>
-              <div className="callout-actions">
-                {spilloverFromMonthImports.slice(0, 3).map((r) => (
-                  <button
-                    key={r.monthId}
-                    type="button"
-                    className="ghost"
-                    onClick={() => setMonthId(r.monthId)}
-                  >
-                    Go to {monthLabel(r.monthId)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
 
           {monthTransactions.length === 0 ? (
             <div className="empty-guide">
@@ -3624,38 +3572,6 @@ export default function App() {
                 </div>
               </div>
 
-              {spilloverFromMonthImports.length > 0 ? (
-                <div className="callout">
-                  <p>
-                    Statements that include {monthLabel(monthId)} also have{' '}
-                    {spilloverFromMonthImports.reduce((s, r) => s + r.count, 0)}{' '}
-                    charge
-                    {spilloverFromMonthImports.reduce((s, r) => s + r.count, 0) ===
-                    1
-                      ? ''
-                      : 's'}{' '}
-                    dated in{' '}
-                    {spilloverFromMonthImports
-                      .map((r) => `${monthLabel(r.monthId)} (${r.count})`)
-                      .join(', ')}
-                    . Month view uses each charge’s date, not the statement
-                    period — open the statement to see every imported row.
-                  </p>
-                  <div className="callout-actions">
-                    {spilloverFromMonthImports.slice(0, 3).map((r) => (
-                      <button
-                        key={r.monthId}
-                        type="button"
-                        className="ghost"
-                        onClick={() => setMonthId(r.monthId)}
-                      >
-                        Go to {monthLabel(r.monthId)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
               {imports.length > 0 ? (
                 <div className="statement-picker">
                   <label>
@@ -3973,6 +3889,8 @@ export default function App() {
               </p>
             </div>
           </div>
+
+          <DemoSyncPreviewPanel />
 
           <CloudSyncPanel
             cloud={cloudContext}

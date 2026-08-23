@@ -9,6 +9,13 @@ import {
   type CloudRemoteStatus,
   type CloudSyncRelation,
 } from '../lib/cloudSync'
+import {
+  DEMO_SYNC_EVENT,
+  applyDemoSyncFromUrl,
+  demoCloudContext,
+  demoRemoteStatus,
+  readDemoSyncRelation,
+} from '../lib/demoSyncPreview'
 import { SyncCloudArrowIcon, SyncSourceIcon } from '../lib/categoryIcons'
 import { personEmoji, personLabel } from '../lib/labels'
 import type { HouseholdBackup } from '../lib/backup'
@@ -68,6 +75,14 @@ export function RemoteSyncBanner({
   /** Lets the shell show a nav badge / sync-first empty states. */
   onSyncStatusChange?: (relation: CloudSyncRelation) => void
 }) {
+  const [demoRelation, setDemoRelation] = useState<CloudSyncRelation | null>(
+    () => {
+      if (!import.meta.env.DEV) return null
+      const fromUrl = applyDemoSyncFromUrl()
+      if (fromUrl !== undefined) return fromUrl
+      return readDemoSyncRelation()
+    },
+  )
   const [status, setStatus] = useState<CloudRemoteStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -76,7 +91,31 @@ export function RemoteSyncBanner({
   const [pollTick, setPollTick] = useState(0)
   const checkingRef = useRef(false)
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    function onDemo(e: Event) {
+      const detail = (e as CustomEvent<CloudSyncRelation | null>).detail
+      setDemoRelation(detail ?? null)
+      setDismissedRelation(null)
+      setError(null)
+    }
+    window.addEventListener(DEMO_SYNC_EVENT, onDemo)
+    return () => window.removeEventListener(DEMO_SYNC_EVENT, onDemo)
+  }, [])
+
+  const effectiveCloud: CloudContext | null =
+    demoRelation != null ? demoCloudContext() : cloud
+  const isDemo = demoRelation != null
+
   const refresh = useCallback(async () => {
+    if (demoRelation != null) {
+      const next = demoRemoteStatus(demoRelation)
+      setStatus(next)
+      setError(null)
+      onSyncStatusChange?.(next.relation)
+      setDismissedRelation((prev) => (prev === next.relation ? prev : null))
+      return
+    }
     if (!cloud || checkingRef.current) return
     checkingRef.current = true
     try {
@@ -90,16 +129,17 @@ export function RemoteSyncBanner({
     } finally {
       checkingRef.current = false
     }
-  }, [cloud, onSyncStatusChange])
+  }, [cloud, demoRelation, onSyncStatusChange])
 
   useEffect(() => {
-    if (!cloud) {
+    if (!effectiveCloud) {
       setStatus(null)
       setDismissedRelation(null)
       onSyncStatusChange?.('up_to_date')
       return
     }
     void refresh()
+    if (isDemo) return
     const id = window.setInterval(() => {
       void refresh()
     }, POLL_MS)
@@ -116,9 +156,9 @@ export function RemoteSyncBanner({
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onFocus)
     }
-  }, [cloud, refresh, pollTick, syncEpoch, onSyncStatusChange])
+  }, [effectiveCloud, isDemo, refresh, pollTick, syncEpoch, onSyncStatusChange])
 
-  if (!cloud || !status) return null
+  if (!effectiveCloud || !status) return null
 
   const relation = status.relation
   if (dismissedRelation === relation) return null
@@ -126,18 +166,19 @@ export function RemoteSyncBanner({
   const remote = status
   const snap = remote.latestSnapshot
   const { who, source, when } = remoteWhoLabel(remote)
-  const counts = snap
-    ? ` (${snap.transactionCount} charges · ${snap.importCount} statements)`
-    : ''
 
   async function handlePull(confirmMessage: string) {
-    if (!cloud) return
+    if (!effectiveCloud) return
+    if (isDemo) {
+      setError('Demo preview — sync actions are disabled.')
+      return
+    }
     const ok = window.confirm(confirmMessage)
     if (!ok) return
     setBusy(true)
     setError(null)
     try {
-      const backup = await pullCloudToDevice(cloud.householdId)
+      const backup = await pullCloudToDevice(effectiveCloud.householdId)
       if (!backup) {
         setError('Cloud ledger is empty — nothing to download.')
       } else {
@@ -153,7 +194,11 @@ export function RemoteSyncBanner({
   }
 
   async function handlePush(confirmMessage: string) {
-    if (!cloud) return
+    if (!effectiveCloud) return
+    if (isDemo) {
+      setError('Demo preview — sync actions are disabled.')
+      return
+    }
     const ok = window.confirm(confirmMessage)
     if (!ok) return
     setBusy(true)
@@ -161,7 +206,7 @@ export function RemoteSyncBanner({
     try {
       const backup = buildLiveBackup()
       const { refusedEmptyOverwrite } = await migrateDeviceToCloud(
-        cloud.householdId,
+        effectiveCloud.householdId,
         backup,
         {
           snapshot: true,
@@ -308,9 +353,7 @@ export function RemoteSyncBanner({
                 <> (cloud · {when})</>
               ) : null}
               .
-            </span>{' '}
-            Choose one side — this app syncs full snapshots, so we won’t
-            auto-merge.{counts}
+            </span>
           </p>
           {error ? <p className="backup-msg warn">{error}</p> : null}
         </div>
@@ -379,10 +422,7 @@ export function RemoteSyncBanner({
               <> from another device</>
             )}
             {when ? <> · {when}</> : null}.
-          </span>{' '}
-          Sync before importing charges so you don’t overwrite or miss work from
-          another device.
-          {counts}
+          </span>
         </p>
         {error ? <p className="backup-msg warn">{error}</p> : null}
       </div>

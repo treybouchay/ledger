@@ -435,6 +435,11 @@ select {
   padding: 0 1.15rem 1.2rem;
 }
 
+.demo-sync-preview-actions {
+  flex-wrap: wrap;
+  margin-bottom: 0.65rem;
+}
+
 .cloud-sign-in-form {
   display: flex;
   flex-wrap: wrap;
