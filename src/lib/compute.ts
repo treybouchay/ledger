@@ -117,6 +117,30 @@ export function personRefunds(
   )
 }
 
+function variableCategoryIds(): Set<CategoryId> {
+  return new Set(
+    getAllCategories()
+      .filter((c) => c.kind === 'variable')
+      .map((c) => c.id),
+  )
+}
+
+/** Refunds logged against variable categories — undo variable spend for leftover. */
+export function personVariableRefunds(
+  transactions: Transaction[],
+  personId: PersonId,
+): number {
+  const ids = variableCategoryIds()
+  return money(
+    transactions
+      .filter(
+        (t) =>
+          t.personId === personId && t.isRefund && ids.has(t.categoryId),
+      )
+      .reduce((sum, t) => sum + t.amount, 0),
+  )
+}
+
 export function personCashIns(
   transactions: Transaction[],
   personId: PersonId,
@@ -147,6 +171,16 @@ export function rollupCategories(
     .map((cat) => {
       const budget = budgetFor(personId, cat.id)
       const spent = categorySpend(transactions, personId, cat.id)
+      const refunds = money(
+        transactions
+          .filter(
+            (t) =>
+              t.personId === personId &&
+              t.categoryId === cat.id &&
+              t.isRefund,
+          )
+          .reduce((sum, t) => sum + t.amount, 0),
+      )
       return {
         categoryId: cat.id,
         label: cat.label,
@@ -154,7 +188,7 @@ export function rollupCategories(
         kind: cat.kind,
         budget,
         spent,
-        leftover: money(budget - spent),
+        leftover: money(budget - spent + refunds),
       }
     })
     .filter((row) => row.budget > 0 || row.spent > 0)
@@ -302,6 +336,7 @@ export function personTotals(
   const variableBudget = budgetByKind(personId, 'variable')
   const fixedSpent = spendByKind(transactions, personId, 'fixed')
   const variableSpent = spendByKind(transactions, personId, 'variable')
+  const variableRefunds = personVariableRefunds(transactions, personId)
   const afterFixed = money(income - fixedBudget)
   const categoryLeftover = money(
     categories
@@ -319,10 +354,13 @@ export function personTotals(
     variableBudget,
     fixedSpent,
     variableSpent,
+    variableRefunds,
     afterFixed,
     categoryLeftover,
-    // Cash-ins expand spendable room without counting as variable spend.
-    stillAvailable: money(variableBudget - variableSpent + cashIns),
+    // Refunds undo variable charges; cash-ins add spendable room without spend.
+    stillAvailable: money(
+      variableBudget - variableSpent + cashIns + variableRefunds,
+    ),
     vsNecessitiesBudget: money(necessitiesBudget(personId) - netSpend),
   }
 }
@@ -445,6 +483,10 @@ export function summarizeMonth(
   const variableSpent = money(
     people.reduce((sum, p) => sum + p.variableSpent, 0),
   )
+  const variableRefunds = money(
+    people.reduce((sum, p) => sum + p.variableRefunds, 0),
+  )
+  const ledgerCashIns = money(people.reduce((sum, p) => sum + p.cashIns, 0))
   const afterFixed = money(combinedSalary - fixedBudget)
   // Household category view: Trevor's detailed categories (primary ledger)
   const categories = rollupCategories(monthTx, 'trevor')
@@ -461,7 +503,9 @@ export function summarizeMonth(
     fixedSpent,
     variableSpent,
     afterFixed,
-    stillAvailable: money(afterFixed - variableSpent),
+    stillAvailable: money(
+      variableBudget - variableSpent + ledgerCashIns + variableRefunds,
+    ),
     categories,
   }
 }

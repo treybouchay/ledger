@@ -123,11 +123,13 @@ export interface MonthPersonTotals {
   variableBudget: number
   fixedSpent: number
   variableSpent: number
+  /** Refunds in variable categories — lower effective variable spend. */
+  variableRefunds: number
   /** Salary − fixed budgets — what the sheet treats as spendable after bills. */
   afterFixed: number
   /** Variable category budgets − variable spend. */
   categoryLeftover: number
-  /** Variable budget − variable spend + ledger cash-ins (not gear cash made). */
+  /** Variable budget − variable spend + variable refunds + ledger cash-ins. */
   stillAvailable: number
   vsNecessitiesBudget: number
 }

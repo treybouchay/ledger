@@ -759,6 +759,25 @@ export default function App() {
     [monthLedgerCashIns],
   )
 
+  /** Variable-category refunds — undo charges for left-to-spend (Amex cashback, returns). */
+  const monthVariableRefundTotal = useMemo(() => {
+    const variableIds = new Set(
+      getAllCategories()
+        .filter((c) => c.kind === 'variable')
+        .map((c) => c.id),
+    )
+    return Math.round(
+      monthTransactions
+        .filter(
+          (t) =>
+            t.isRefund &&
+            variableIds.has(t.categoryId) &&
+            (personFilter === 'all' || t.personId === personFilter),
+        )
+        .reduce((sum, t) => sum + t.amount, 0) * 100,
+    ) / 100
+  }, [monthTransactions, personFilter, customCategories])
+
   const monthImports = useMemo(
     () => imports.filter((item) => item.monthIds.includes(monthId)),
     [imports, monthId],
@@ -966,12 +985,13 @@ export default function App() {
   const insightFixedBudget =
     overviewInsight?.fixedBudget ?? summary.fixedBudget
   // Overview always focuses on variable caps; fixed bills are assumed paid.
-  // Ledger cash-ins (Log → Cash in) expand left-to-spend; gear cash stays a what-if.
+  // Ledger cash-ins and variable refunds expand left-to-spend; gear cash stays a what-if.
   const insightStillAvailable =
     Math.round(
       (insightVariableBudget -
         insightVariableSpent +
-        monthLedgerCashInTotal) *
+        monthLedgerCashInTotal +
+        monthVariableRefundTotal) *
         100,
     ) / 100
   const insightSpendCap = Math.max(insightVariableBudget, 0)
@@ -2299,8 +2319,8 @@ export default function App() {
                   }`}
                 >
                   {insightStillAvailable >= 0
-                    ? monthLedgerCashInTotal > 0
-                      ? 'Left of your variable budgets · includes cash added'
+                    ? monthLedgerCashInTotal > 0 || monthVariableRefundTotal > 0
+                      ? 'Left of your variable budgets · includes cash added and refunds'
                       : 'Left of your variable budgets'
                     : 'Over your variable budget caps'}
                 </p>
@@ -4972,6 +4992,7 @@ function PersonCard({
     afterFixed: number
     variableBudget: number
     variableSpent: number
+    variableRefunds?: number
     stillAvailable: number
     categoryLeftover: number
   }
@@ -5012,6 +5033,14 @@ function PersonCard({
             <dt>Cash in</dt>
             <dd className="leftover good">
               +{formatMoney(totals.cashIns ?? 0)}
+            </dd>
+          </div>
+        ) : null}
+        {(totals.variableRefunds ?? 0) > 0 ? (
+          <div>
+            <dt>Refunds</dt>
+            <dd className="leftover good">
+              +{formatMoney(totals.variableRefunds ?? 0)}
             </dd>
           </div>
         ) : null}
