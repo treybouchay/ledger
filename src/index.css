@@ -7642,6 +7642,26 @@ button.linkish {
   color: var(--ink-muted);
 }
 
+.person-card-quiet dd.deduct {
+  color: var(--ink-muted);
+}
+
+.person-card-quiet dd.good {
+  color: var(--good);
+  font-weight: 600;
+}
+
+.insight-card .on-track-breakdown {
+  margin-top: 0.35rem;
+  padding-top: 0.55rem;
+}
+
+.insight-card .on-track-breakdown + .what-if-cash-made {
+  margin-top: 0.35rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed color-mix(in srgb, var(--line) 75%, transparent);
+}
+
 .person-card dl {
   margin: 0;
   display: grid;

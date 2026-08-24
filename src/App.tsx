@@ -1036,14 +1036,16 @@ export default function App() {
         monthVariableRefundTotal) *
         100,
     ) / 100
-  // Bar = uses of salary (fixed / variable / leftover) plus a distinct gear-flip
-  // infusion segment. Leftover card stays income − fixed − variable (no flips).
-  // Base expands by positive flip profit so segments still sum to ~100%:
-  //   fixed + variable + max(0, salary leftover) + flipProfit = income + flipProfit
-  //   (when overspent on salary: leftover segment is 0; flips still appear in full).
+  const actualVariableNetSpent =
+    Math.round((actualVariableSpent - actualVariableRefunds) * 100) / 100
+  const salaryLeftoverPositive = Math.max(0, actualLeftover)
+  // Bar segments share one denominator so widths match legend dollars (net variable,
+  // not gross spend — otherwise cashback inflates the variable slice).
   const actualAllocBase = Math.max(
-    actualIncome + flipProfitPositive,
-    assumedFixedBills + actualVariableSpent + flipProfitPositive,
+    assumedFixedBills +
+      actualVariableNetSpent +
+      salaryLeftoverPositive +
+      flipProfitPositive,
     1,
   )
   const actualFixedPct = Math.min(
@@ -1052,16 +1054,16 @@ export default function App() {
   )
   const actualVariablePct = Math.min(
     100,
-    (actualVariableSpent / actualAllocBase) * 100,
+    (actualVariableNetSpent / actualAllocBase) * 100,
   )
+  const actualLeftoverPct =
+    salaryLeftoverPositive > 0
+      ? Math.min(100, (salaryLeftoverPositive / actualAllocBase) * 100)
+      : 0
   const actualFlipPct =
     flipProfitPositive > 0
       ? Math.min(100, (flipProfitPositive / actualAllocBase) * 100)
       : 0
-  const actualLeftoverPct = Math.max(
-    0,
-    100 - actualFixedPct - actualVariablePct - actualFlipPct,
-  )
 
   const monthEndLines = monthEndSaveLines(summary.people)
 
@@ -2436,9 +2438,12 @@ export default function App() {
                   >
                     {formatMoney(actualLeftover)}
                   </div>
-                  <p className="stat-sub">
-                    Income − fixed (assumed paid) − variable spent
-                  </p>
+                  <OnTrackSaveBreakdown
+                    income={actualIncome}
+                    fixed={assumedFixedBills}
+                    variableSpent={actualVariableSpent}
+                    cashback={actualVariableRefunds}
+                  />
                   {showLeftoverIfGearCash ? (
                     <p className="stat-sub what-if-cash-made">
                       If + cash made − non-gear (
@@ -2472,7 +2477,11 @@ export default function App() {
               <div
                 className="budget-alloc-bar"
                 role="img"
-                aria-label={`Fixed bills assumed paid ${formatMoney(assumedFixedBills)}, variable spent ${formatMoney(actualVariableSpent)}${
+                aria-label={`Fixed bills assumed paid ${formatMoney(assumedFixedBills)}, variable spent ${formatMoney(actualVariableNetSpent)}${
+                  actualVariableRefunds > 0
+                    ? ` (${formatMoney(actualVariableSpent)} gross − ${formatMoney(actualVariableRefunds)} cashback)`
+                    : ''
+                }${
                   flipProfitPositive > 0 || cashMadeForIncome !== 0
                     ? `, gear flip profit ${formatMoney(flipProfitPositive)}, total cash made ${formatMoney(cashMadeForIncome)}`
                     : ''
@@ -2494,8 +2503,12 @@ export default function App() {
                         actualVariableSpent,
                         insightVariableBudget,
                       )
-                        ? 'Variable spent (over budget)'
-                        : 'Variable spent (actual)'
+                        ? `Variable spent ${formatMoney(actualVariableNetSpent)} net (over budget)`
+                        : `Variable spent ${formatMoney(actualVariableNetSpent)} net${
+                            actualVariableRefunds > 0
+                              ? ` (${formatMoney(actualVariableSpent)} − ${formatMoney(actualVariableRefunds)} cashback)`
+                              : ''
+                          }`
                     }
                   />
                 ) : null}
@@ -2536,8 +2549,15 @@ export default function App() {
                         : undefined
                     }
                   >
-                    {formatMoney(actualVariableSpent)}
+                    {formatMoney(actualVariableNetSpent)}
                   </strong>
+                  {actualVariableRefunds > 0 ? (
+                    <span className="legend-cash-made">
+                      {' '}
+                      ({formatMoney(actualVariableSpent)} −{' '}
+                      {formatMoney(actualVariableRefunds)} cashback)
+                    </span>
+                  ) : null}
                 </li>
                 <li>
                   <span className="swatch free" aria-hidden />
@@ -5003,6 +5023,49 @@ function RecentChargeList({
         )
       })}
     </ul>
+  )
+}
+
+function OnTrackSaveBreakdown({
+  income,
+  fixed,
+  variableSpent,
+  cashback,
+}: {
+  income: number
+  fixed: number
+  variableSpent: number
+  cashback: number
+}) {
+  const netVariable =
+    Math.round((variableSpent - cashback) * 100) / 100
+  return (
+    <dl className="person-card-quiet on-track-breakdown">
+      <div>
+        <dt>Income</dt>
+        <dd>{formatMoney(income)}</dd>
+      </div>
+      <div>
+        <dt>Fixed bills (assumed paid)</dt>
+        <dd className="deduct">−{formatMoney(fixed)}</dd>
+      </div>
+      <div>
+        <dt>Variable spent</dt>
+        <dd className="deduct">−{formatMoney(variableSpent)}</dd>
+      </div>
+      {cashback > 0 ? (
+        <div>
+          <dt>Cashback (Amex & credits)</dt>
+          <dd className="good">+{formatMoney(cashback)}</dd>
+        </div>
+      ) : null}
+      {cashback > 0 ? (
+        <div>
+          <dt>Net variable spent</dt>
+          <dd className="deduct">−{formatMoney(netVariable)}</dd>
+        </div>
+      ) : null}
+    </dl>
   )
 }
 
