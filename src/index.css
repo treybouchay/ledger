@@ -2653,8 +2653,20 @@ select {
 
 .statements-toolbar {
   display: flex;
-  justify-content: flex-end;
-  padding: 0.65rem 1rem 0.15rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  padding: 0.65rem 1rem 0.35rem;
+}
+
+.statements-person-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.panel > .statements-toolbar {
+  padding-top: 0.15rem;
 }
 
 .statements-embedded .empty-note {

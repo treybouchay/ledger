@@ -1345,6 +1345,20 @@ export function ImportReviewQueue({
                 >
                   Clear queue
                 </button>
+                {previewUrls.length > 0 ? (
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setViewerIndex(0)}
+                    title={
+                      previewUrls.length === 1
+                        ? 'Preview uploaded screenshot'
+                        : `Preview ${previewUrls.length} uploaded screenshots`
+                    }
+                  >
+                    Quick preview
+                  </button>
+                ) : null}
               </div>
               <button
                 type="button"
