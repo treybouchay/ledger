@@ -321,7 +321,8 @@ export function personTotals(
     variableSpent,
     afterFixed,
     categoryLeftover,
-    stillAvailable: money(variableBudget - variableSpent),
+    // Cash-ins expand spendable room without counting as variable spend.
+    stillAvailable: money(variableBudget - variableSpent + cashIns),
     vsNecessitiesBudget: money(necessitiesBudget(personId) - netSpend),
   }
 }

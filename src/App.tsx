@@ -966,8 +966,14 @@ export default function App() {
   const insightFixedBudget =
     overviewInsight?.fixedBudget ?? summary.fixedBudget
   // Overview always focuses on variable caps; fixed bills are assumed paid.
+  // Ledger cash-ins (Log → Cash in) expand left-to-spend; gear cash stays a what-if.
   const insightStillAvailable =
-    Math.round((insightVariableBudget - insightVariableSpent) * 100) / 100
+    Math.round(
+      (insightVariableBudget -
+        insightVariableSpent +
+        monthLedgerCashInTotal) *
+        100,
+    ) / 100
   const insightSpendCap = Math.max(insightVariableBudget, 0)
   const insightPersonLabel =
     personFilter === 'all'
@@ -1005,7 +1011,10 @@ export default function App() {
   const showLeftoverIfGearCash =
     monthCashMade.sold !== 0 || monthCashMade.nonGear > 0
   const variableBudgetIfCashMade =
-    Math.round((insightVariableBudget + cashMadeForIncome) * 100) / 100
+    Math.round(
+      (insightVariableBudget + monthLedgerCashInTotal + cashMadeForIncome) *
+        100,
+    ) / 100
   const leftOfVariableIfCashMade =
     Math.round((variableBudgetIfCashMade - insightVariableSpent) * 100) / 100
   // Bar = uses of salary (fixed / variable / leftover) plus a distinct gear-flip
@@ -2290,7 +2299,9 @@ export default function App() {
                   }`}
                 >
                   {insightStillAvailable >= 0
-                    ? 'Left of your variable budgets'
+                    ? monthLedgerCashInTotal > 0
+                      ? 'Left of your variable budgets · includes cash added'
+                      : 'Left of your variable budgets'
                     : 'Over your variable budget caps'}
                 </p>
                 <SpendMeter
@@ -2875,7 +2886,7 @@ export default function App() {
                     trevor.stillAvailable,
                     kate.stillAvailable,
                     Math.round(
-                      (summary.variableBudget - summary.variableSpent) * 100,
+                      (trevor.stillAvailable + kate.stillAvailable) * 100,
                     ) / 100,
                     true,
                   ],
@@ -2950,8 +2961,9 @@ export default function App() {
               <div className="empty-guide embedded">
                 <p>
                   Cash in from Log expense (ATM, e-transfer, gifts) lands here —
-                  separate from gear sells. It cuts net spend for the month and
-                  shows on your accounts, but it is not gear cash made.
+                  separate from gear sells. It increases what’s left to spend,
+                  cuts net spend, and shows on your accounts — not gear cash
+                  made.
                 </p>
                 <div className="empty-guide-actions">
                   <button
@@ -2966,8 +2978,8 @@ export default function App() {
             ) : (
               <div className="overview-cash-ins">
                 <p className="stat-sub overview-cash-ins-lead">
-                  Ledger cash-ins only — not gear sells or non-gear spends from
-                  Gear flips.
+                  Added into what’s left to spend · not gear sells or non-gear
+                  spends from Gear flips.
                 </p>
                 <RecentChargeList
                   charges={monthLedgerCashIns}

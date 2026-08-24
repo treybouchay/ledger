@@ -127,7 +127,7 @@ export interface MonthPersonTotals {
   afterFixed: number
   /** Variable category budgets − variable spend. */
   categoryLeftover: number
-  /** Variable budget caps − variable spend (aligned with planned variable pool). */
+  /** Variable budget − variable spend + ledger cash-ins (not gear cash made). */
   stillAvailable: number
   vsNecessitiesBudget: number
 }
