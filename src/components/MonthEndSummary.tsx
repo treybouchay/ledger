@@ -90,6 +90,7 @@ function CompositionBar({
   fixed,
   variable,
   variableBudget,
+  variableRefunds = 0,
   emphasize,
   muted,
 }: {
@@ -98,15 +99,17 @@ function CompositionBar({
   fixed: number
   variable: number
   variableBudget: number
+  variableRefunds?: number
   emphasize?: boolean
   muted?: boolean
 }) {
+  const variableNet = moneyRound(variable - variableRefunds)
   const { leftover, fixedPct, variablePct, leftoverPct } = allocPercents(
     income,
     fixed,
-    variable,
+    variableNet,
   )
-  const variableOver = isVariableBudgetOver(variable, variableBudget)
+  const variableOver = isVariableBudgetOver(variableNet, variableBudget)
   const fixedEnd = fixedPct
   const variableEnd = fixedPct + variablePct
   const varStop = variableOver
@@ -136,7 +139,7 @@ function CompositionBar({
       <div
         className="budget-alloc-bar month-end-comp-bar"
         role="img"
-        aria-label={`${label}: fixed ${formatMoney(fixed)}, variable ${formatMoney(variable)}${variableOver ? ' (over budget)' : ''}, leftover ${formatMoney(leftover)}`}
+        aria-label={`${label}: fixed ${formatMoney(fixed)}, variable ${formatMoney(variableNet)}${variableRefunds > 0 ? ` (${formatMoney(variable)} spent − ${formatMoney(variableRefunds)} cashback)` : ''}${variableOver ? ' (over budget)' : ''}, leftover ${formatMoney(leftover)}`}
         style={
           gradientStops.length > 0
             ? {
@@ -155,7 +158,15 @@ function CompositionBar({
             className={`swatch variable${variableOver ? ' over' : ''}`}
             aria-hidden
           />
-          Variable {formatMoney(variable)}
+          Variable {formatMoney(variableNet)}
+          {variableRefunds > 0 ? (
+            <>
+              {' '}
+              <span className="month-end-cashback-note">
+                ({formatMoney(variable)} − {formatMoney(variableRefunds)} cashback)
+              </span>
+            </>
+          ) : null}
           {variableOver ? ' (over)' : ''}
         </li>
         <li>
@@ -246,7 +257,7 @@ export function MonthEndSummary({
         <div className="month-end-chart-block">
           <h3 className="month-end-subhead">How income was used</h3>
           <p className="month-end-hint">
-            Planned fixed + variable spent + leftover (or overrun past income)
+            Planned fixed + net variable spent (after cashback) + leftover
           </p>
           <div className="month-end-comps">
             {([trevor, kate, both] as const).map((row) => (
@@ -256,6 +267,7 @@ export function MonthEndSummary({
                 income={row.income}
                 fixed={row.plannedFixed}
                 variable={row.variableSpent}
+                variableRefunds={row.variableRefunds}
                 variableBudget={row.variableBudget}
                 emphasize={
                   personFilter === 'all' ||
@@ -272,10 +284,72 @@ export function MonthEndSummary({
           </div>
         </div>
 
+        <div className="month-end-chart-block">
+          <h3 className="month-end-subhead">Variable budget</h3>
+          <p className="month-end-hint">
+            Cap − spent + cashback = left of your variable budgets
+          </p>
+          <div className="month-end-table-wrap">
+            <table className="month-end-table month-end-variable-table">
+              <caption className="visually-hidden">
+                Variable cap, spent, cashback, and leftover by person
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Who</th>
+                  <th scope="col">Variable cap</th>
+                  <th scope="col">Spent</th>
+                  <th scope="col">Cashback</th>
+                  <th scope="col">Left of cap</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((row) => {
+                  const leftOfCap = moneyRound(
+                    row.variableBudget - row.variableNetSpent,
+                  )
+                  const focused =
+                    row.id === 'both'
+                      ? personFilter === 'all'
+                      : personFilter === 'all' || personFilter === row.id
+                  const muted =
+                    personFilter !== 'all' &&
+                    row.id !== 'both' &&
+                    row.id !== personFilter
+                  const variableOver = isVariableBudgetOver(
+                    row.variableNetSpent,
+                    row.variableBudget,
+                  )
+                  return (
+                    <tr
+                      key={`var-${row.id}`}
+                      className={`${row.id === 'both' ? 'is-both' : ''}${focused ? ' is-focus' : ''}${muted ? ' is-muted' : ''}`}
+                    >
+                      <th scope="row">{row.label}</th>
+                      <td>{formatMoney(row.variableBudget)}</td>
+                      <td className={variableOver ? 'bad' : undefined}>
+                        {formatMoney(row.variableSpent)}
+                      </td>
+                      <td className={row.variableRefunds > 0 ? 'good' : undefined}>
+                        {row.variableRefunds > 0
+                          ? `+${formatMoney(row.variableRefunds)}`
+                          : '—'}
+                      </td>
+                      <td className={leftOfCap >= 0 ? 'good' : 'bad'}>
+                        {formatMoney(leftOfCap)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div className="month-end-table-wrap">
           <table className="month-end-table">
             <caption className="visually-hidden">
-              Income, planned fixed, variable spent, and on track to save by
+              Income, planned fixed, net variable spent, and on track to save by
               person
             </caption>
             <thead>
@@ -284,6 +358,7 @@ export function MonthEndSummary({
                 <th scope="col">Income</th>
                 <th scope="col">Planned fixed</th>
                 <th scope="col">Variable spent</th>
+                <th scope="col">Cashback</th>
                 <th scope="col">On track to save</th>
               </tr>
             </thead>
@@ -298,7 +373,7 @@ export function MonthEndSummary({
                   row.id !== 'both' &&
                   row.id !== personFilter
                 const variableOver = isVariableBudgetOver(
-                  row.variableSpent,
+                  row.variableNetSpent,
                   row.variableBudget,
                 )
                 return (
@@ -311,6 +386,17 @@ export function MonthEndSummary({
                     <td>{formatMoney(row.plannedFixed)}</td>
                     <td className={variableOver ? 'bad' : undefined}>
                       {formatMoney(row.variableSpent)}
+                      {row.variableRefunds > 0 ? (
+                        <span className="month-end-net-note">
+                          {' '}
+                          → {formatMoney(row.variableNetSpent)} net
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className={row.variableRefunds > 0 ? 'good' : undefined}>
+                      {row.variableRefunds > 0
+                        ? `+${formatMoney(row.variableRefunds)}`
+                        : '—'}
                     </td>
                     <td
                       className={
@@ -328,9 +414,10 @@ export function MonthEndSummary({
 
         <p className="month-end-footnote">
           <strong>Not the same as “What’s left to spend.”</strong> Person view
-          leftover is unused <em>variable budget</em>; Both’s hero leftover is
-          the pool left after fixed bills. “On track to save” always uses income
-          − planned fixed − variable spent, and Both is the sum of each person.
+          leftover is unused <em>variable budget</em> (cap − spent + cashback);
+          Both’s hero leftover is the pool left after fixed bills. “On track to
+          save” uses income − planned fixed − net variable spent (spent minus
+          cashback), and Both is the sum of each person.
         </p>
       </div>
     </section>

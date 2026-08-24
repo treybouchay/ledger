@@ -393,13 +393,15 @@ export function rollupHouseholdFixed(
     .filter((row) => row.budget > 0 || row.spent > 0)
 }
 
-/** Income − planned fixed bills − variable spent (“On track to save”). */
+/** Income − planned fixed bills − net variable spent (“On track to save”). */
 export function onTrackToSave(row: {
   income: number
   fixedBudget: number
   variableSpent: number
+  variableRefunds?: number
 }): number {
-  return money(row.income - row.fixedBudget - row.variableSpent)
+  const netVariable = money(row.variableSpent - (row.variableRefunds ?? 0))
+  return money(row.income - row.fixedBudget - netVariable)
 }
 
 export interface MonthEndSaveLine {
@@ -409,6 +411,10 @@ export interface MonthEndSaveLine {
   plannedFixed: number
   variableBudget: number
   variableSpent: number
+  /** Variable-category refunds (Amex cashback, returns). */
+  variableRefunds: number
+  /** Spent minus cashback — used for on-track and over-budget checks. */
+  variableNetSpent: number
   onTrackToSave: number
 }
 
@@ -441,6 +447,8 @@ export function monthEndSaveLines(
       plannedFixed: trevor.fixedBudget,
       variableBudget: trevor.variableBudget,
       variableSpent: trevor.variableSpent,
+      variableRefunds: trevor.variableRefunds,
+      variableNetSpent: money(trevor.variableSpent - trevor.variableRefunds),
       onTrackToSave: trevorSave,
     },
     {
@@ -450,6 +458,8 @@ export function monthEndSaveLines(
       plannedFixed: kate.fixedBudget,
       variableBudget: kate.variableBudget,
       variableSpent: kate.variableSpent,
+      variableRefunds: kate.variableRefunds,
+      variableNetSpent: money(kate.variableSpent - kate.variableRefunds),
       onTrackToSave: kateSave,
     },
     {
@@ -459,6 +469,12 @@ export function monthEndSaveLines(
       plannedFixed: money(trevor.fixedBudget + kate.fixedBudget),
       variableBudget: money(trevor.variableBudget + kate.variableBudget),
       variableSpent: money(trevor.variableSpent + kate.variableSpent),
+      variableRefunds: money(trevor.variableRefunds + kate.variableRefunds),
+      variableNetSpent: money(
+        trevor.variableSpent -
+          trevor.variableRefunds +
+          (kate.variableSpent - kate.variableRefunds),
+      ),
       onTrackToSave: money(trevorSave + kateSave),
     },
   ]

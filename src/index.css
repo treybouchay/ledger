@@ -2358,6 +2358,17 @@ select {
   font-weight: 600;
 }
 
+.month-end-cashback-note,
+.month-end-net-note {
+  font-size: 0.82em;
+  font-weight: 450;
+  color: var(--ink-muted);
+}
+
+.month-end-variable-table {
+  margin-top: 0;
+}
+
 .month-end-footnote {
   margin: 0;
   font-size: 0.82rem;

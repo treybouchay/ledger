@@ -1007,10 +1007,16 @@ export default function App() {
   const assumedFixedBills =
     overviewInsight?.fixedBudget ?? summary.fixedBudget
   const actualVariableSpent = insightVariableSpent
+  const actualVariableRefunds =
+    overviewInsight?.variableRefunds ??
+    Math.round(
+      summary.people.reduce((sum, p) => sum + p.variableRefunds, 0) * 100,
+    ) / 100
   const actualLeftover = onTrackToSave({
     income: actualIncome,
     fixedBudget: assumedFixedBills,
     variableSpent: actualVariableSpent,
+    variableRefunds: actualVariableRefunds,
   })
   // Gear flip profit is display-only from gear cash economics — not Transaction cash-ins.
   const monthFlipProfit = realizedFlipProfitForMonth(gear.cash, monthId)
