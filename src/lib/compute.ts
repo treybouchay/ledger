@@ -125,6 +125,21 @@ function variableCategoryIds(): Set<CategoryId> {
   )
 }
 
+/** Credit-card accounts — statement credits (Amex cashback) aren't category-specific. */
+const CREDIT_CARD_ACCOUNT_IDS = new Set<AccountId>([
+  'amex',
+  'td_cashback',
+  'first_class',
+])
+
+function countsAsCashbackCredit(
+  t: Pick<Transaction, 'isRefund' | 'categoryId' | 'accountId'>,
+): boolean {
+  if (!t.isRefund) return false
+  if (variableCategoryIds().has(t.categoryId)) return true
+  return CREDIT_CARD_ACCOUNT_IDS.has(t.accountId)
+}
+
 /** Refunds logged against variable categories — undo variable spend for leftover. */
 export function personVariableRefunds(
   transactions: Transaction[],
@@ -136,6 +151,37 @@ export function personVariableRefunds(
       .filter(
         (t) =>
           t.personId === personId && t.isRefund && ids.has(t.categoryId),
+      )
+      .reduce((sum, t) => sum + t.amount, 0),
+  )
+}
+
+/**
+ * Cashback credits for variable leftover — variable refunds plus credit-card
+ * statement credits (Amex rewards) even when categorized under fixed bills.
+ */
+export function personCashbackCredits(
+  transactions: Transaction[],
+  personId: PersonId,
+): number {
+  return money(
+    transactions
+      .filter((t) => t.personId === personId && countsAsCashbackCredit(t))
+      .reduce((sum, t) => sum + t.amount, 0),
+  )
+}
+
+/** Month cashback total for overview filters (Both / one person). */
+export function monthCashbackCreditsTotal(
+  transactions: Transaction[],
+  personFilter: 'all' | PersonId = 'all',
+): number {
+  return money(
+    transactions
+      .filter(
+        (t) =>
+          countsAsCashbackCredit(t) &&
+          (personFilter === 'all' || t.personId === personFilter),
       )
       .reduce((sum, t) => sum + t.amount, 0),
   )
@@ -336,7 +382,7 @@ export function personTotals(
   const variableBudget = budgetByKind(personId, 'variable')
   const fixedSpent = spendByKind(transactions, personId, 'fixed')
   const variableSpent = spendByKind(transactions, personId, 'variable')
-  const variableRefunds = personVariableRefunds(transactions, personId)
+  const variableRefunds = personCashbackCredits(transactions, personId)
   const afterFixed = money(income - fixedBudget)
   const categoryLeftover = money(
     categories

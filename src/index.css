@@ -1400,6 +1400,19 @@ select {
   font-weight: 600;
 }
 
+.overview-quiet-strip .variable-budget-reconcile .good,
+.overview-quiet-strip .variable-budget-reconcile .bad {
+  font-weight: 600;
+}
+
+.overview-quiet-strip .variable-budget-reconcile .good {
+  color: var(--good);
+}
+
+.overview-quiet-strip .variable-budget-reconcile .bad {
+  color: var(--bad);
+}
+
 .insight-card .what-if-cash-made {
   margin-top: 0.45rem;
   padding-top: 0.45rem;

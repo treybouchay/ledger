@@ -40,6 +40,7 @@ import {
   formatMoney,
   isMoneyIn,
   isVariableBudgetOver,
+  monthCashbackCreditsTotal,
   monthEndSaveLines,
   onTrackToSave,
   rollupAccounts,
@@ -759,24 +760,11 @@ export default function App() {
     [monthLedgerCashIns],
   )
 
-  /** Variable-category refunds — undo charges for left-to-spend (Amex cashback, returns). */
-  const monthVariableRefundTotal = useMemo(() => {
-    const variableIds = new Set(
-      getAllCategories()
-        .filter((c) => c.kind === 'variable')
-        .map((c) => c.id),
-    )
-    return Math.round(
-      monthTransactions
-        .filter(
-          (t) =>
-            t.isRefund &&
-            variableIds.has(t.categoryId) &&
-            (personFilter === 'all' || t.personId === personFilter),
-        )
-        .reduce((sum, t) => sum + t.amount, 0) * 100,
-    ) / 100
-  }, [monthTransactions, personFilter, customCategories])
+  /** Cashback credits — variable refunds + Amex/card statement credits. */
+  const monthVariableRefundTotal = useMemo(
+    () => monthCashbackCreditsTotal(monthTransactions, personFilter),
+    [monthTransactions, personFilter, customCategories],
+  )
 
   const monthImports = useMemo(
     () => imports.filter((item) => item.monthIds.includes(monthId)),
@@ -1042,7 +1030,12 @@ export default function App() {
         100,
     ) / 100
   const leftOfVariableIfCashMade =
-    Math.round((variableBudgetIfCashMade - insightVariableSpent) * 100) / 100
+    Math.round(
+      (variableBudgetIfCashMade -
+        insightVariableSpent +
+        monthVariableRefundTotal) *
+        100,
+    ) / 100
   // Bar = uses of salary (fixed / variable / leftover) plus a distinct gear-flip
   // infusion segment. Leftover card stays income − fixed − variable (no flips).
   // Base expands by positive flip profit so segments still sum to ~100%:
@@ -2677,6 +2670,30 @@ export default function App() {
                   ? `Trevor ${formatMoney(trevor.variableBudget)} · Kate ${formatMoney(kate.variableBudget)}`
                   : 'Planned variable caps this month'}
               </p>
+              <p className="stat-sub variable-budget-reconcile">
+                {formatMoney(insightVariableBudget)} cap −{' '}
+                {formatMoney(insightVariableSpent)} spent
+                {monthVariableRefundTotal > 0 ? (
+                  <>
+                    {' '}
+                    + {formatMoney(monthVariableRefundTotal)} cashback
+                  </>
+                ) : null}
+                {monthLedgerCashInTotal > 0 ? (
+                  <>
+                    {' '}
+                    + {formatMoney(monthLedgerCashInTotal)} cash in
+                  </>
+                ) : null}
+                {' = '}
+                <span
+                  className={
+                    insightStillAvailable >= 0 ? 'good' : 'bad'
+                  }
+                >
+                  {formatMoney(insightStillAvailable)} left
+                </span>
+              </p>
               {showFlipProfit &&
               (cashMadeForIncome !== 0 || monthCashMade.sold > 0) ? (
                 <p className="stat-sub what-if-cash-made">
@@ -2690,6 +2707,12 @@ export default function App() {
                   >
                     {formatMoney(leftOfVariableIfCashMade)} left
                   </span>
+                  {monthVariableRefundTotal > 0 ? (
+                    <>
+                      {' '}
+                      (incl. {formatMoney(monthVariableRefundTotal)} cashback)
+                    </>
+                  ) : null}
                 </p>
               ) : null}
             </div>

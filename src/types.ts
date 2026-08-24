@@ -123,7 +123,7 @@ export interface MonthPersonTotals {
   variableBudget: number
   fixedSpent: number
   variableSpent: number
-  /** Refunds in variable categories — lower effective variable spend. */
+  /** Cashback credits — variable refunds + Amex/card statement credits. */
   variableRefunds: number
   /** Salary − fixed budgets — what the sheet treats as spendable after bills. */
   afterFixed: number
