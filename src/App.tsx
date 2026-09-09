@@ -1038,6 +1038,12 @@ export default function App() {
     ) / 100
   const actualVariableNetSpent =
     Math.round((actualVariableSpent - actualVariableRefunds) * 100) / 100
+  /** Same as actualVariableNetSpent — use for Variable budget used / meters / OVER. */
+  const insightVariableNetSpent = actualVariableNetSpent
+  const variableBudgetOver = isVariableBudgetOver(
+    insightVariableNetSpent,
+    insightVariableBudget,
+  )
   const salaryLeftoverPositive = Math.max(0, actualLeftover)
   // Bar segments share one denominator so widths match legend dollars (net variable,
   // not gross spend — otherwise cashback inflates the variable slice).
@@ -2326,9 +2332,13 @@ export default function App() {
                     : 'Over your variable budget caps'}
                 </p>
                 <SpendMeter
-                  used={insightVariableSpent}
+                  used={insightVariableNetSpent}
                   total={Math.max(insightSpendCap, 0)}
-                  caption={`${formatMoney(insightVariableSpent)} spent of ${formatMoney(insightVariableBudget)} planned`}
+                  caption={`${formatMoney(insightVariableNetSpent)} spent of ${formatMoney(insightVariableBudget)} planned${
+                    monthVariableRefundTotal > 0
+                      ? ` · after ${formatMoney(monthVariableRefundTotal)} cashback`
+                      : ''
+                  }`}
                 />
                 {(() => {
                   const trevorLine = monthEndLines.find((r) => r.id === 'trevor')
@@ -2378,48 +2388,37 @@ export default function App() {
               </div>
               <div className="insight-side">
                 <div
-                  className={`insight-card${
-                    isVariableBudgetOver(
-                      insightVariableSpent,
-                      insightVariableBudget,
-                    )
-                      ? ' is-over'
-                      : ''
-                  }`}
+                  className={`insight-card${variableBudgetOver ? ' is-over' : ''}`}
                 >
                   <div className="insight-card-top">
                     <span className="stat-label">Variable budget used</span>
                     <BudgetStatus
-                      spent={insightVariableSpent}
+                      spent={insightVariableNetSpent}
                       budget={insightVariableBudget}
                     />
                   </div>
                   <div
-                    className={`insight-figure-sm${
-                      isVariableBudgetOver(
-                        insightVariableSpent,
-                        insightVariableBudget,
-                      )
-                        ? ' bad'
-                        : ''
-                    }`}
+                    className={`insight-figure-sm${variableBudgetOver ? ' bad' : ''}`}
                   >
-                    {formatMoney(insightVariableSpent)}
+                    {formatMoney(insightVariableNetSpent)}
                   </div>
                   <p
-                    className={`stat-sub${
-                      isVariableBudgetOver(
-                        insightVariableSpent,
-                        insightVariableBudget,
-                      )
-                        ? ' bad'
-                        : ''
-                    }`}
+                    className={`stat-sub${variableBudgetOver ? ' bad' : ''}`}
                   >
                     of {formatMoney(insightVariableBudget)} planned this month
                   </p>
+                  {monthVariableRefundTotal > 0 ? (
+                    <p className="stat-sub variable-used-refund-math">
+                      {formatMoney(insightVariableSpent)} spent −{' '}
+                      <span className="good">
+                        {formatMoney(monthVariableRefundTotal)} cashback
+                      </span>
+                      {' = '}
+                      {formatMoney(insightVariableNetSpent)} net
+                    </p>
+                  ) : null}
                   <SpendMeter
-                    used={insightVariableSpent}
+                    used={insightVariableNetSpent}
                     total={insightVariableBudget}
                   />
                   {recentVariableCharges.length > 0 ? (
@@ -2496,13 +2495,10 @@ export default function App() {
                 ) : null}
                 {actualVariablePct > 0 ? (
                   <span
-                    className={`seg variable${isVariableBudgetOver(actualVariableSpent, insightVariableBudget) ? ' over' : ''}`}
+                    className={`seg variable${variableBudgetOver ? ' over' : ''}`}
                     style={{ width: `${actualVariablePct}%` }}
                     title={
-                      isVariableBudgetOver(
-                        actualVariableSpent,
-                        insightVariableBudget,
-                      )
+                      variableBudgetOver
                         ? `Variable spent ${formatMoney(actualVariableNetSpent)} net (over budget)`
                         : `Variable spent ${formatMoney(actualVariableNetSpent)} net${
                             actualVariableRefunds > 0
@@ -2535,20 +2531,11 @@ export default function App() {
                 </li>
                 <li>
                   <span
-                    className={`swatch variable${isVariableBudgetOver(actualVariableSpent, insightVariableBudget) ? ' over' : ''}`}
+                    className={`swatch variable${variableBudgetOver ? ' over' : ''}`}
                     aria-hidden
                   />
                   Variable spent{' '}
-                  <strong
-                    className={
-                      isVariableBudgetOver(
-                        actualVariableSpent,
-                        insightVariableBudget,
-                      )
-                        ? 'bad'
-                        : undefined
-                    }
-                  >
+                  <strong className={variableBudgetOver ? 'bad' : undefined}>
                     {formatMoney(actualVariableNetSpent)}
                   </strong>
                   {actualVariableRefunds > 0 ? (
@@ -2692,11 +2679,11 @@ export default function App() {
               </p>
               <p className="stat-sub variable-budget-reconcile">
                 {formatMoney(insightVariableBudget)} cap −{' '}
-                {formatMoney(insightVariableSpent)} spent
+                {formatMoney(insightVariableNetSpent)} spent
                 {monthVariableRefundTotal > 0 ? (
                   <>
                     {' '}
-                    + {formatMoney(monthVariableRefundTotal)} cashback
+                    (net of {formatMoney(monthVariableRefundTotal)} cashback)
                   </>
                 ) : null}
                 {monthLedgerCashInTotal > 0 ? (
@@ -2944,10 +2931,19 @@ export default function App() {
                     false,
                   ],
                   [
-                    'Variable spent',
-                    trevor.variableSpent,
-                    kate.variableSpent,
-                    summary.variableSpent,
+                    'Variable spent (net)',
+                    Math.round(
+                      (trevor.variableSpent - trevor.variableRefunds) * 100,
+                    ) / 100,
+                    Math.round(
+                      (kate.variableSpent - kate.variableRefunds) * 100,
+                    ) / 100,
+                    Math.round(
+                      (summary.variableSpent -
+                        trevor.variableRefunds -
+                        kate.variableRefunds) *
+                        100,
+                    ) / 100,
                     false,
                   ],
                   [
@@ -5094,7 +5090,11 @@ function PersonCard({
       <div className="person-card-hero">
         <h3>{name}</h3>
         <BudgetStatus
-          spent={totals.variableSpent}
+          spent={
+            Math.round(
+              (totals.variableSpent - (totals.variableRefunds ?? 0)) * 100,
+            ) / 100
+          }
           budget={totals.variableBudget}
           underLabel="On track"
           overLabel="Over budget"
@@ -5107,9 +5107,17 @@ function PersonCard({
       </div>
       <p className="stat-sub">Left of your variable budgets</p>
       <SpendMeter
-        used={totals.variableSpent}
+        used={
+          Math.round(
+            (totals.variableSpent - (totals.variableRefunds ?? 0)) * 100,
+          ) / 100
+        }
         total={totals.variableBudget}
-        caption={`${formatMoney(totals.variableSpent)} of ${formatMoney(totals.variableBudget)} planned`}
+        caption={`${formatMoney(
+          Math.round(
+            (totals.variableSpent - (totals.variableRefunds ?? 0)) * 100,
+          ) / 100,
+        )} of ${formatMoney(totals.variableBudget)} planned`}
       />
       <dl className="person-card-quiet">
         <div>

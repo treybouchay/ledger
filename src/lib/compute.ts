@@ -216,7 +216,7 @@ export function rollupCategories(
   return getAllCategories()
     .map((cat) => {
       const budget = budgetFor(personId, cat.id)
-      const spent = categorySpend(transactions, personId, cat.id)
+      const gross = categorySpend(transactions, personId, cat.id)
       const refunds = money(
         transactions
           .filter(
@@ -227,6 +227,8 @@ export function rollupCategories(
           )
           .reduce((sum, t) => sum + t.amount, 0),
       )
+      // Net of refunds so meters match leftover / cashback math everywhere.
+      const spent = money(gross - refunds)
       return {
         categoryId: cat.id,
         label: cat.label,
@@ -234,10 +236,10 @@ export function rollupCategories(
         kind: cat.kind,
         budget,
         spent,
-        leftover: money(budget - spent + refunds),
+        leftover: money(budget - spent),
       }
     })
-    .filter((row) => row.budget > 0 || row.spent > 0)
+    .filter((row) => row.budget > 0 || row.spent !== 0)
 }
 
 export interface AccountRollup {

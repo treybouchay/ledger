@@ -7662,6 +7662,16 @@ button.linkish {
   border-top: 1px dashed color-mix(in srgb, var(--line) 75%, transparent);
 }
 
+.insight-card .variable-used-refund-math {
+  margin: 0.15rem 0 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.insight-card .variable-used-refund-math .good {
+  color: var(--good);
+  font-weight: 600;
+}
+
 .person-card dl {
   margin: 0;
   display: grid;
