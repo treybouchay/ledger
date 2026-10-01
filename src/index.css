@@ -4854,6 +4854,50 @@ select {
   outline-offset: 1px;
 }
 
+.buy-status-select {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.2rem 0.15rem 0.45rem;
+  cursor: pointer;
+  position: relative;
+}
+
+.buy-status-select select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 0 1.1rem 0 0;
+  margin: 0;
+  cursor: pointer;
+  line-height: 1.2;
+  max-width: 8.5rem;
+}
+
+.buy-status-select::after {
+  content: '';
+  position: absolute;
+  right: 0.35rem;
+  top: 50%;
+  width: 0.35rem;
+  height: 0.35rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.buy-status-select:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .status-tag-kept {
   color: #6b3f1f;
   background: color-mix(in srgb, #f0d5b8 70%, #fff);

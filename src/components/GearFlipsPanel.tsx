@@ -54,7 +54,6 @@ import type {
   GearCashMove,
   GearItemTags,
   GearKeepItem,
-  GearListingStatus,
   GearMonth,
   GearProjectedManualRow,
   GearSoldVia,
@@ -599,17 +598,6 @@ function IconUndo() {
   )
 }
 
-function IconKeep() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden focusable="false">
-      <path
-        fill="currentColor"
-        d="M4.5 2.25A1.75 1.75 0 0 0 2.75 4v9.25a.75.75 0 0 0 1.2.6L8 11.06l4.05 2.79a.75.75 0 0 0 1.2-.6V4A1.75 1.75 0 0 0 11.5 2.25h-7ZM4.25 4c0-.14.11-.25.25-.25h7c.14 0 .25.11.25.25v7.94l-3.3-2.27a.75.75 0 0 0-.9 0l-3.3 2.27V4Z"
-      />
-    </svg>
-  )
-}
-
 function CashMoveRail({ tone }: { tone: 'in' | 'out' | 'neutral' }) {
   return <span className={`cash-move-rail ${tone}`} aria-hidden />
 }
@@ -848,6 +836,58 @@ function CashItemTagFilter({
         </button>
       ))}
     </div>
+  )
+}
+
+type BuyInventoryStatus = 'listed' | 'not_listed' | 'kept'
+
+const BUY_INVENTORY_STATUS_OPTIONS: readonly {
+  id: BuyInventoryStatus
+  label: string
+}[] = [
+  { id: 'not_listed', label: 'Not listed' },
+  { id: 'listed', label: 'Listed' },
+  { id: 'kept', label: 'Kept' },
+]
+
+/** Dropdown to set buy inventory: not listed / listed / kept. */
+function BuyInventoryStatusSelect({
+  value,
+  onChange,
+}: {
+  value: BuyInventoryStatus
+  onChange: (next: BuyInventoryStatus) => void
+}) {
+  const tone =
+    value === 'kept' ? 'kept' : value === 'listed' ? 'listed' : 'not-listed'
+  return (
+    <label
+      className={`buy-status-select status-tag status-tag-${tone}`}
+      title="Change listing status"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span className="visually-hidden">Inventory status</span>
+      <select
+        value={value}
+        aria-label="Inventory status"
+        onChange={(e) => {
+          const next = e.target.value as BuyInventoryStatus
+          if (
+            next === 'listed' ||
+            next === 'not_listed' ||
+            next === 'kept'
+          ) {
+            onChange(next)
+          }
+        }}
+      >
+        {BUY_INVENTORY_STATUS_OPTIONS.map((opt) => (
+          <option key={opt.id} value={opt.id}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 
@@ -1898,7 +1938,7 @@ function CashLedger({
   projectedTargets,
   onChangeOpening,
   onChangeMoves,
-  onKeepBuy,
+  onSetBuyStatus,
   onViewReceipt,
   itemTagFilter,
   onItemTagFilterChange,
@@ -1909,7 +1949,7 @@ function CashLedger({
   projectedTargets: Record<string, number | null>
   onChangeOpening: (n: number) => void
   onChangeMoves: (moves: GearCashMove[]) => void
-  onKeepBuy: (move: GearCashMove) => void
+  onSetBuyStatus: (move: GearCashMove, status: BuyInventoryStatus) => void
   onViewReceipt: () => void
   itemTagFilter: ItemTagFilter
   onItemTagFilterChange: (next: ItemTagFilter) => void
@@ -2450,14 +2490,6 @@ function CashLedger({
     return 'Show purchase / sale summary'
   }
 
-  function toggleListingStatus(move: GearCashMove) {
-    if (!isGearInventoryBuy(move)) return
-    if (excludedBuys.has(move.id)) return
-    const next: GearListingStatus =
-      effectiveListingStatus(move) === 'listed' ? 'not_listed' : 'listed'
-    patchMove(move.id, { listingStatus: next })
-  }
-
   function renderPairSummary(move: GearCashMove) {
     const members = membersOf(move)
     const fromChainJump =
@@ -2647,8 +2679,6 @@ function CashLedger({
     const isLinking = linkingFrom?.id === move.id
     const isNotesOpen = notesId === move.id
     const hasNote = Boolean(move.notes?.trim())
-    const isBuy = isGearInventoryBuy(move)
-    const alreadyKept = isBuy && excludedBuys.has(move.id)
     return (
       <div
         className="cash-move-actions"
@@ -2686,17 +2716,6 @@ function CashLedger({
         >
           <IconNote />
         </button>
-        {isBuy && !alreadyKept ? (
-          <button
-            type="button"
-            className="icon-btn"
-            title="Keep (not for sale)"
-            aria-label="Keep — not for sale"
-            onClick={() => onKeepBuy(move)}
-          >
-            <IconKeep />
-          </button>
-        ) : null}
         {paired && !sameNamePair ? (
           <button
             type="button"
@@ -2894,6 +2913,9 @@ function CashLedger({
       isBuy && !alreadyKept && !hasLinkedSell
         ? effectiveListingStatus(move)
         : null
+    const inventoryStatus: BuyInventoryStatus | null = alreadyKept
+      ? 'kept'
+      : listing
     return (
       <li
         key={move.id}
@@ -2933,10 +2955,6 @@ function CashLedger({
                 value={move.soldVia}
                 onChange={(next) => patchMove(move.id, { soldVia: next })}
               />
-            ) : alreadyKept ? (
-              <span className="status-tag status-tag-kept" title="Kept — not for sale">
-                Kept
-              </span>
             ) : hasLinkedSell ? (
               <span
                 className="status-tag status-tag-sold"
@@ -2944,23 +2962,11 @@ function CashLedger({
               >
                 Sold
               </span>
-            ) : listing ? (
-              <button
-                type="button"
-                className={`status-tag status-tag-${listing === 'listed' ? 'listed' : 'not-listed'} is-toggle`}
-                title={
-                  listing === 'listed'
-                    ? 'Listed for sale — click to mark not listed'
-                    : 'Not listed — click to mark listed'
-                }
-                aria-pressed={listing === 'listed'}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  toggleListingStatus(move)
-                }}
-              >
-                {listing === 'listed' ? 'Listed' : 'Not listed'}
-              </button>
+            ) : inventoryStatus ? (
+              <BuyInventoryStatusSelect
+                value={inventoryStatus}
+                onChange={(next) => onSetBuyStatus(move, next)}
+              />
             ) : null}
             {!nonGear ? renderPairLink(move) : null}
           </div>
@@ -4840,6 +4846,36 @@ export function GearFlipsPanel({
     })
   }
 
+  function setBuyStatus(move: GearCashMove, status: BuyInventoryStatus) {
+    if (!isGearInventoryBuy(move)) return
+    if (cashGroupOpposites(state.cash, move).length > 0) return
+
+    const isKept = keepList.some((k) => k.cashMoveId === move.id)
+
+    if (status === 'kept') {
+      if (!isKept) keepBuy(move)
+      return
+    }
+
+    let nextKeep = keepList
+    let cash = state.cash
+    if (isKept) {
+      nextKeep = keepList.filter((k) => k.cashMoveId !== move.id)
+      cash = cash.map((m) =>
+        m.id === move.id ? { ...m, linkLocked: false } : m,
+      )
+    }
+    cash = cash.map((m) =>
+      m.id === move.id
+        ? {
+            ...m,
+            listingStatus: status,
+          }
+        : m,
+    )
+    onChange({ ...state, cash, keepList: nextKeep })
+  }
+
   function changeKeepList(next: GearKeepItem[]) {
     const prevIds = keptBuyIds(keepList)
     const nextIds = keptBuyIds(next)
@@ -4981,7 +5017,7 @@ export function GearFlipsPanel({
             onChange({ ...state, openingBalance })
           }
           onChangeMoves={changeCash}
-          onKeepBuy={keepBuy}
+          onSetBuyStatus={setBuyStatus}
           onViewReceipt={() => setSub('history')}
           itemTagFilter={cashItemTagFilter}
           onItemTagFilterChange={setCashItemTagFilter}
