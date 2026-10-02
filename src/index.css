@@ -4898,6 +4898,13 @@ select {
   outline-offset: 1px;
 }
 
+.keep-status-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
 .status-tag-kept {
   color: #6b3f1f;
   background: color-mix(in srgb, #f0d5b8 70%, #fff);

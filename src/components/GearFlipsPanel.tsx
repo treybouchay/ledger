@@ -4234,9 +4234,12 @@ function InsightsPanel({
 function KeepListPanel({
   keepList,
   onChange,
+  onSetBuyStatus,
 }: {
   keepList: GearKeepItem[]
   onChange: (next: GearKeepItem[]) => void
+  /** When a keep row came from a cash buy, change Listed / Not listed / Kept. */
+  onSetBuyStatus: (row: GearKeepItem, status: BuyInventoryStatus) => void
 }) {
   const [tags, setTags] = useState<GearItemTags>(() => emptyGearTags())
   const [notes, setNotes] = useState('')
@@ -4418,7 +4421,14 @@ function KeepListPanel({
                       {row.notes ? (
                         <span className="keep-notes">{row.notes}</span>
                       ) : null}
-                      <span className="status-tag status-tag-kept">Kept</span>
+                      {row.cashMoveId ? (
+                        <BuyInventoryStatusSelect
+                          value="kept"
+                          onChange={(next) => onSetBuyStatus(row, next)}
+                        />
+                      ) : (
+                        <span className="status-tag status-tag-kept">Kept</span>
+                      )}
                       {row.cashMoveId ? (
                         <span className="keep-from-buy">From buy</span>
                       ) : null}
@@ -4486,6 +4496,15 @@ function KeepListPanel({
                             />
                           </div>
                         </label>
+                        {row.cashMoveId ? (
+                          <label className="span-2 keep-status-field">
+                            Status
+                            <BuyInventoryStatusSelect
+                              value="kept"
+                              onChange={(next) => onSetBuyStatus(row, next)}
+                            />
+                          </label>
+                        ) : null}
                         <label className="span-2">
                           Notes
                           <input
@@ -4876,6 +4895,19 @@ export function GearFlipsPanel({
     onChange({ ...state, cash, keepList: nextKeep })
   }
 
+  function setKeepRowStatus(row: GearKeepItem, status: BuyInventoryStatus) {
+    if (status === 'kept') return
+    if (row.cashMoveId) {
+      const move = state.cash.find((m) => m.id === row.cashMoveId)
+      if (move) {
+        setBuyStatus(move, status)
+        return
+      }
+    }
+    // Manual keep entry (no linked buy) — Listed/Not listed means leave the keep list.
+    changeKeepList(keepList.filter((k) => k.id !== row.id))
+  }
+
   function changeKeepList(next: GearKeepItem[]) {
     const prevIds = keptBuyIds(keepList)
     const nextIds = keptBuyIds(next)
@@ -5034,7 +5066,11 @@ export function GearFlipsPanel({
       ) : null}
 
       {sub === 'keep' ? (
-        <KeepListPanel keepList={keepList} onChange={changeKeepList} />
+        <KeepListPanel
+          keepList={keepList}
+          onChange={changeKeepList}
+          onSetBuyStatus={setKeepRowStatus}
+        />
       ) : null}
 
       {sub === 'insights' ? (
