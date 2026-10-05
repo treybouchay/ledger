@@ -15,6 +15,7 @@ import {
   detachBuyFromProjectedMonth,
   effectiveListingStatus,
   gearSalesInsights,
+  gearBuysForMonth,
   insertCashMoveSorted,
   isGearInventoryBuy,
   isNonGearSpend,
@@ -2268,6 +2269,10 @@ function CashLedger({
     () => netCashMadeForMonth(moves, profitMonthId),
     [moves, profitMonthId],
   )
+  const monthGearBuys = useMemo(
+    () => gearBuysForMonth(moves, profitMonthId),
+    [moves, profitMonthId],
+  )
   const profitMonthLabel = useMemo(
     () => formatProfitMonthLabel(profitMonthId),
     [profitMonthId],
@@ -3377,43 +3382,91 @@ function CashLedger({
           </div>
         </div>
 
-        {monthFlipProfit.flips.length === 0 ? (
+        {monthFlipProfit.flips.length === 0 && monthGearBuys.length === 0 ? (
           <p className="stat-sub cash-profit-empty">
-            No linked sells in {profitMonthLabel}.
+            No linked sells or gear buys in {profitMonthLabel}.
           </p>
         ) : (
-          <ul className="cash-profit-flips">
-            {monthFlipProfit.flips.map((flip) => (
-              <li key={flip.linkGroupId} className="cash-math-row">
-                <div className="cash-math-main">
-                  <span className="cash-math-item">{flip.label}</span>
-                  <span className="cash-math-meta">
-                    {flip.sellDate ? (
-                      <time dateTime={flip.sellDate}>{flip.sellDate}</time>
-                    ) : null}
-                    <GearTagPills tags={flip.tags} />
-                  </span>
-                </div>
-                <div className="cash-math-figures">
-                  <span className="cash-math-delta muted">
-                    Sold {formatMoney(flip.sold)}
-                  </span>
-                  <span
-                    className={`cash-math-run${
-                      flip.profit > 0
-                        ? ' total good'
-                        : flip.profit < 0
-                          ? ' total bad'
-                          : ''
-                    }`}
-                  >
-                    {flip.profit > 0 ? '+' : flip.profit < 0 ? '−' : ''}
-                    {formatMoney(Math.abs(flip.profit))}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="cash-profit-lists">
+            <section className="cash-profit-list-block" aria-label="Sold this month">
+              <h3 className="cash-profit-list-heading">
+                Sold
+                {monthFlipProfit.flips.length > 0
+                  ? ` · ${monthFlipProfit.flips.length}`
+                  : ''}
+              </h3>
+              {monthFlipProfit.flips.length === 0 ? (
+                <p className="stat-sub cash-profit-list-empty">
+                  No linked sells this month.
+                </p>
+              ) : (
+                <ul className="cash-profit-flips">
+                  {monthFlipProfit.flips.map((flip) => (
+                    <li key={flip.linkGroupId} className="cash-math-row">
+                      <div className="cash-math-main">
+                        <span className="cash-math-item">{flip.label}</span>
+                        <span className="cash-math-meta">
+                          {flip.sellDate ? (
+                            <time dateTime={flip.sellDate}>{flip.sellDate}</time>
+                          ) : null}
+                          <GearTagPills tags={flip.tags} />
+                        </span>
+                      </div>
+                      <div className="cash-math-figures">
+                        <span className="cash-math-delta muted">
+                          Sold {formatMoney(flip.sold)}
+                        </span>
+                        <span
+                          className={`cash-math-run${
+                            flip.profit > 0
+                              ? ' total good'
+                              : flip.profit < 0
+                                ? ' total bad'
+                                : ''
+                          }`}
+                        >
+                          {flip.profit > 0 ? '+' : flip.profit < 0 ? '−' : ''}
+                          {formatMoney(Math.abs(flip.profit))}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section className="cash-profit-list-block" aria-label="Bought this month">
+              <h3 className="cash-profit-list-heading">
+                Bought
+                {monthGearBuys.length > 0 ? ` · ${monthGearBuys.length}` : ''}
+              </h3>
+              {monthGearBuys.length === 0 ? (
+                <p className="stat-sub cash-profit-list-empty">
+                  No gear buys dated this month.
+                </p>
+              ) : (
+                <ul className="cash-profit-flips">
+                  {monthGearBuys.map((buy) => (
+                    <li key={buy.id} className="cash-math-row">
+                      <div className="cash-math-main">
+                        <span className="cash-math-item">{buy.label}</span>
+                        <span className="cash-math-meta">
+                          {buy.date ? (
+                            <time dateTime={buy.date}>{buy.date}</time>
+                          ) : null}
+                          <GearTagPills tags={buy.tags} />
+                        </span>
+                      </div>
+                      <div className="cash-math-figures">
+                        <span className="cash-math-delta out">
+                          −{formatMoney(buy.amount)}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
         )}
       </div>
 

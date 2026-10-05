@@ -882,6 +882,46 @@ export function nonGearSpendForMonth(
   return Math.round(sum * 100) / 100
 }
 
+export interface MonthGearBuyRow {
+  id: string
+  label: string
+  tags: GearItemTags | null
+  amount: number
+  date: string
+}
+
+/** Gear inventory buys dated in `monthId` (YYYY-MM) — newest first. */
+export function gearBuysForMonth(
+  cash: GearCashMove[],
+  monthId: string,
+): MonthGearBuyRow[] {
+  if (!/^\d{4}-\d{2}$/.test(monthId)) return []
+  const rows: MonthGearBuyRow[] = []
+  for (const m of cash) {
+    if (!isGearInventoryBuy(m)) continue
+    if ((m.date?.trim().slice(0, 7) ?? '') !== monthId) continue
+    const amount = Number(m.amount)
+    if (!Number.isFinite(amount) || amount <= 0) continue
+    const fromTags = formatGearItemLabel(m.tags)
+    const label =
+      fromTags ||
+      (m.item ?? '').trim() ||
+      'Untitled buy'
+    rows.push({
+      id: m.id,
+      label,
+      tags: m.tags ? { ...m.tags } : null,
+      amount: Math.round(amount * 100) / 100,
+      date: m.date?.trim().slice(0, 10) ?? '',
+    })
+  }
+  rows.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1
+    return a.label.localeCompare(b.label)
+  })
+  return rows
+}
+
 /**
  * Gross linked-sell cash made for the month, minus non-gear spends that month.
  * Gear cash-pool figure only — non-gear does not reduce household monthly income.
