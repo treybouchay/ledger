@@ -3855,8 +3855,31 @@ select {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  max-height: min(22rem, 55vh);
-  overflow: auto;
+}
+
+.cash-profit-list-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 0.55rem 0 0;
+  padding-top: 0.45rem;
+  border-top: 1px dashed color-mix(in srgb, var(--line) 80%, transparent);
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
+.cash-profit-list-total strong {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92rem;
+}
+
+.cash-profit-list-total strong.good {
+  color: var(--good);
+}
+
+.cash-profit-list-total strong.bad {
+  color: var(--bad);
 }
 
 @media (max-width: 640px) {

@@ -3411,38 +3411,46 @@ function CashLedger({
                   No linked sells this month.
                 </p>
               ) : (
-                <ul className="cash-profit-flips">
-                  {monthFlipProfit.flips.map((flip) => (
-                    <li key={flip.linkGroupId} className="cash-math-row">
-                      <div className="cash-math-main">
-                        <span className="cash-math-item">{flip.label}</span>
-                        <span className="cash-math-meta">
-                          {flip.sellDate ? (
-                            <time dateTime={flip.sellDate}>{flip.sellDate}</time>
-                          ) : null}
-                          <GearTagPills tags={flip.tags} />
-                        </span>
-                      </div>
-                      <div className="cash-math-figures">
-                        <span className="cash-math-delta muted">
-                          Sold {formatMoney(flip.sold)}
-                        </span>
-                        <span
-                          className={`cash-math-run${
-                            flip.profit > 0
-                              ? ' total good'
-                              : flip.profit < 0
-                                ? ' total bad'
-                                : ''
-                          }`}
-                        >
-                          {flip.profit > 0 ? '+' : flip.profit < 0 ? '−' : ''}
-                          {formatMoney(Math.abs(flip.profit))}
-                        </span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="cash-profit-flips">
+                    {monthFlipProfit.flips.map((flip) => (
+                      <li key={flip.linkGroupId} className="cash-math-row">
+                        <div className="cash-math-main">
+                          <span className="cash-math-item">{flip.label}</span>
+                          <span className="cash-math-meta">
+                            {flip.sellDate ? (
+                              <time dateTime={flip.sellDate}>{flip.sellDate}</time>
+                            ) : null}
+                            <GearTagPills tags={flip.tags} />
+                          </span>
+                        </div>
+                        <div className="cash-math-figures">
+                          <span className="cash-math-delta muted">
+                            Sold {formatMoney(flip.sold)}
+                          </span>
+                          <span
+                            className={`cash-math-run${
+                              flip.profit > 0
+                                ? ' total good'
+                                : flip.profit < 0
+                                  ? ' total bad'
+                                  : ''
+                            }`}
+                          >
+                            {flip.profit > 0 ? '+' : flip.profit < 0 ? '−' : ''}
+                            {formatMoney(Math.abs(flip.profit))}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="cash-profit-list-total">
+                    <span>Total sold</span>
+                    <strong className="good">
+                      {formatMoney(monthCashMade.sold)}
+                    </strong>
+                  </p>
+                </>
               )}
             </section>
             <section className="cash-profit-list-block" aria-label="Bought this month">
@@ -3455,26 +3463,34 @@ function CashLedger({
                   No gear buys dated this month.
                 </p>
               ) : (
-                <ul className="cash-profit-flips">
-                  {monthGearBuys.map((buy) => (
-                    <li key={buy.id} className="cash-math-row">
-                      <div className="cash-math-main">
-                        <span className="cash-math-item">{buy.label}</span>
-                        <span className="cash-math-meta">
-                          {buy.date ? (
-                            <time dateTime={buy.date}>{buy.date}</time>
-                          ) : null}
-                          <GearTagPills tags={buy.tags} />
-                        </span>
-                      </div>
-                      <div className="cash-math-figures">
-                        <span className="cash-math-delta out">
-                          −{formatMoney(buy.amount)}
-                        </span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="cash-profit-flips">
+                    {monthGearBuys.map((buy) => (
+                      <li key={buy.id} className="cash-math-row">
+                        <div className="cash-math-main">
+                          <span className="cash-math-item">{buy.label}</span>
+                          <span className="cash-math-meta">
+                            {buy.date ? (
+                              <time dateTime={buy.date}>{buy.date}</time>
+                            ) : null}
+                            <GearTagPills tags={buy.tags} />
+                          </span>
+                        </div>
+                        <div className="cash-math-figures">
+                          <span className="cash-math-delta out">
+                            −{formatMoney(buy.amount)}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="cash-profit-list-total">
+                    <span>Total bought</span>
+                    <strong className="bad">
+                      −{formatMoney(monthCashSpent)}
+                    </strong>
+                  </p>
+                </>
               )}
             </section>
           </div>
