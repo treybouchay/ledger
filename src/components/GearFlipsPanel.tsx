@@ -3300,6 +3300,31 @@ function CashLedger({
                 {formatMoney(monthFlipProfit.profit)}
               </div>
             </div>
+            <div>
+              <span className="stat-label">Total cash made</span>
+              <div
+                className={`stat-value${
+                  monthCashMade.sold < 0
+                    ? ' bad'
+                    : monthCashMade.sold > 0
+                      ? ' good'
+                      : ''
+                }`}
+              >
+                {formatMoney(monthCashMade.sold)}
+              </div>
+            </div>
+            <div>
+              <span className="stat-label">Cash spent</span>
+              <div
+                className={`stat-value${
+                  monthFlipProfit.purchased > 0 ? ' bad' : ''
+                }`}
+              >
+                {monthFlipProfit.purchased > 0 ? '−' : ''}
+                {formatMoney(monthFlipProfit.purchased)}
+              </div>
+            </div>
             {monthCashMade.nonGear > 0 ? (
               <div>
                 <span className="stat-label">Non-gear spend</span>
@@ -3308,20 +3333,6 @@ function CashLedger({
                 </div>
               </div>
             ) : null}
-            <div>
-              <span className="stat-label">Total cash made</span>
-              <div
-                className={`stat-value${
-                  monthCashMade.net < 0
-                    ? ' bad'
-                    : monthCashMade.net > 0
-                      ? ' good'
-                      : ''
-                }`}
-              >
-                {formatMoney(monthCashMade.net)}
-              </div>
-            </div>
             <p className="stat-sub cash-profit-metrics-sub">
               Sold {formatMoney(monthCashMade.sold)}
               {monthCashMade.nonGear > 0

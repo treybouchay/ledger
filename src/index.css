@@ -3786,13 +3786,13 @@ select {
 
 .cash-profit-metrics {
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: auto auto auto;
   gap: 0.35rem 1.5rem;
   align-items: start;
 }
 
 .cash-profit-metrics.with-non-gear {
-  grid-template-columns: auto auto auto;
+  grid-template-columns: auto auto auto auto;
 }
 
 .cash-profit-metrics-sub {
@@ -3845,8 +3845,10 @@ select {
     grid-template-columns: 1fr 1fr;
   }
 
-  .cash-profit-metrics.with-non-gear > div:nth-child(3) {
-    grid-column: 1 / -1;
+  .cash-profit-metrics > div:nth-child(3),
+  .cash-profit-metrics.with-non-gear > div:nth-child(3),
+  .cash-profit-metrics.with-non-gear > div:nth-child(4) {
+    grid-column: auto;
   }
 
   .cash-profit-month-nav {
