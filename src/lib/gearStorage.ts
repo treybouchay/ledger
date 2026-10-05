@@ -471,6 +471,60 @@ export function keptBuyIds(
   return ids
 }
 
+function tagsEqual(
+  a: GearItemTags | null | undefined,
+  b: GearItemTags | null | undefined,
+): boolean {
+  const left = a ?? null
+  const right = b ?? null
+  if (left === right) return true
+  if (!left || !right) return false
+  return (
+    (left.kind ?? null) === (right.kind ?? null) &&
+    (left.level ?? null) === (right.level ?? null) &&
+    (left.size ?? null) === (right.size ?? null) &&
+    (left.gloveSize ?? null) === (right.gloveSize ?? null) &&
+    (left.colour ?? null) === (right.colour ?? null) &&
+    (left.brand ?? null) === (right.brand ?? null) &&
+    (left.detail ?? null) === (right.detail ?? null)
+  )
+}
+
+/**
+ * Keep-list rows linked to a cash buy mirror that buy’s label, tags, notes,
+ * date, and cost whenever the ledger is edited elsewhere.
+ */
+export function syncKeepListFromCash(
+  keepList: readonly GearKeepItem[],
+  cash: readonly GearCashMove[],
+): GearKeepItem[] {
+  if (keepList.length === 0) return keepList as GearKeepItem[]
+  const byId = new Map(cash.map((m) => [m.id, m]))
+  let changed = false
+  const next = keepList.map((k) => {
+    if (!k.cashMoveId) return k
+    const move = byId.get(k.cashMoveId)
+    if (!move || !isGearInventoryBuy(move)) return k
+    const item = (move.item ?? '').trim() || k.item
+    const tags = move.tags ? { ...move.tags } : null
+    const notes = move.notes?.trim() || null
+    const date = move.date?.slice(0, 10) ?? null
+    const cost = Math.round(move.amount * 100) / 100
+    if (
+      k.item === item &&
+      tagsEqual(k.tags, tags) &&
+      (k.notes ?? null) === notes &&
+      (k.date?.slice(0, 10) ?? null) === date &&
+      k.cost === cost
+    ) {
+      return k
+    }
+    changed = true
+    return { ...k, item, tags, notes, date, cost }
+  })
+  return changed ? next : (keepList as GearKeepItem[])
+}
+
 function readLinkedMoveId(raw: unknown): string | null {
   return typeof raw === 'string' && raw.trim() ? raw.trim() : null
 }

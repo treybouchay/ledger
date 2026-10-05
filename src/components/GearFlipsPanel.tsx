@@ -28,6 +28,7 @@ import {
   realizedFlipProfitForMonth,
   reconcileSeedCashDates,
   removeCashMove,
+  syncKeepListFromCash,
   sortCashMoves,
   suggestSellItemNames,
   sumNullable,
@@ -4931,9 +4932,11 @@ export function GearFlipsPanel({
   }
 
   function changeCash(cash: GearCashMove[]) {
+    const nextKeep = syncKeepListFromCash(state.keepList ?? [], cash)
     onChange({
       ...state,
       cash,
+      keepList: nextKeep,
       months: syncPlannerMonths(
         state.months,
         cash,
