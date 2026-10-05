@@ -2273,6 +2273,14 @@ function CashLedger({
     () => gearBuysForMonth(moves, profitMonthId),
     [moves, profitMonthId],
   )
+  /** Cash spent this calendar month = gear buys dated here (not flip cost of older inventory). */
+  const monthCashSpent = useMemo(
+    () =>
+      Math.round(
+        monthGearBuys.reduce((sum, b) => sum + b.amount, 0) * 100,
+      ) / 100,
+    [monthGearBuys],
+  )
   const profitMonthLabel = useMemo(
     () => formatProfitMonthLabel(profitMonthId),
     [profitMonthId],
@@ -3322,12 +3330,10 @@ function CashLedger({
             <div>
               <span className="stat-label">Cash spent</span>
               <div
-                className={`stat-value${
-                  monthFlipProfit.purchased > 0 ? ' bad' : ''
-                }`}
+                className={`stat-value${monthCashSpent > 0 ? ' bad' : ''}`}
               >
-                {monthFlipProfit.purchased > 0 ? '−' : ''}
-                {formatMoney(monthFlipProfit.purchased)}
+                {monthCashSpent > 0 ? '−' : ''}
+                {formatMoney(monthCashSpent)}
               </div>
             </div>
             {monthCashMade.nonGear > 0 ? (
@@ -3343,7 +3349,12 @@ function CashLedger({
               {monthCashMade.nonGear > 0
                 ? ` − non-gear ${formatMoney(monthCashMade.nonGear)} (cash pool)`
                 : ''}
-              {` · cost ${formatMoney(monthFlipProfit.purchased)}`}
+              {monthFlipProfit.purchased > 0
+                ? ` · flip cost ${formatMoney(monthFlipProfit.purchased)}`
+                : ''}
+              {monthCashSpent > 0
+                ? ` · bought this month ${formatMoney(monthCashSpent)}`
+                : ''}
               {monthFlipProfit.sellCount > 0
                 ? ` · ${monthFlipProfit.sellCount} sell${
                     monthFlipProfit.sellCount === 1 ? '' : 's'
