@@ -1375,8 +1375,9 @@ export type SellItemSuggestion = {
 }
 
 /**
- * Suggest inventory names for a new/edited sell from prior buys.
- * Prefers unlinked buys, then linked groups where purchased > sold.
+ * Suggest inventory buys for a new/edited sell.
+ * One row per open buy (so a sale can match several items), preferring
+ * unlinked inventory, then linked groups where purchased > sold.
  * Fully matched groups (sold ≥ purchased) are omitted.
  * Buys on the keep list (via cashMoveId) are excluded.
  */
@@ -1385,40 +1386,45 @@ export function suggestSellItemNames(
   excludeBuyIds?: ReadonlySet<string> | readonly string[],
 ): SellItemSuggestion[] {
   type Acc = {
+    key: string
     label: string
     remaining: number
     priority: number
     tags?: GearItemTags | null
-    buyId?: string | null
+    buyId: string
   }
-  const byKey = new Map<string, Acc>()
+  const byBuyId = new Map<string, Acc>()
   const excluded =
     excludeBuyIds instanceof Set
       ? excludeBuyIds
       : new Set(excludeBuyIds ?? [])
 
-  function bump(
+  function put(
+    buyId: string,
     label: string,
     remaining: number,
     priority: number,
     tags?: GearItemTags | null,
-    buyId?: string | null,
   ) {
-    const key = normalizeCashItem(label)
     const trimmed = label.trim()
-    if (!key || !trimmed || remaining <= 0) return
-    const prev = byKey.get(key)
-    if (!prev) {
-      byKey.set(key, { label: trimmed, remaining, priority, tags, buyId })
+    if (!trimmed || remaining <= 0) return
+    const prev = byBuyId.get(buyId)
+    if (prev) {
+      byBuyId.set(buyId, {
+        ...prev,
+        remaining: Math.round((prev.remaining + remaining) * 100) / 100,
+        priority: Math.max(prev.priority, priority),
+        tags: prev.tags ?? tags,
+      })
       return
     }
-    byKey.set(key, {
-      label: prev.label,
-      remaining:
-        Math.round((prev.remaining + remaining) * 100) / 100,
-      priority: Math.max(prev.priority, priority),
-      tags: prev.tags ?? tags,
-      buyId: prev.buyId ?? buyId ?? null,
+    byBuyId.set(buyId, {
+      key: `buy:${buyId}`,
+      label: trimmed,
+      remaining,
+      priority,
+      tags,
+      buyId,
     })
   }
 
@@ -1427,7 +1433,7 @@ export function suggestSellItemNames(
     if (excluded.has(buy.id)) continue
     const label = (buy.item ?? '').trim()
     if (!label) continue
-    bump(label, buy.amount, 2, buy.tags, buy.id)
+    put(buy.id, label, buy.amount, 2, buy.tags)
   }
 
   const groups = new Map<string, GearCashMove[]>()
@@ -1454,57 +1460,28 @@ export function suggestSellItemNames(
     if (namedPurchased <= 0) continue
 
     const priority = groupSells.length === 0 ? 2 : 1
-    const nameTotals = new Map<
-      string,
-      {
-        label: string
-        amount: number
-        tags?: GearItemTags | null
-        buyId?: string | null
-      }
-    >()
     for (const b of namedBuys) {
       const label = (b.item ?? '').trim()
-      const key = normalizeCashItem(label)
-      const prev = nameTotals.get(key)
-      if (prev) prev.amount = Math.round((prev.amount + b.amount) * 100) / 100
-      else
-        nameTotals.set(key, {
-          label,
-          amount: b.amount,
-          tags: b.tags,
-          buyId: b.id,
-        })
-    }
-
-    for (const { label, amount, tags, buyId } of nameTotals.values()) {
       const share =
-        Math.round(remaining * (amount / namedPurchased) * 100) / 100
-      bump(label, share, priority, tags, buyId)
+        Math.round(remaining * (b.amount / namedPurchased) * 100) / 100
+      put(b.id, label, share, priority, b.tags)
     }
   }
 
-  return [...byKey.entries()]
-    .map(([key, v]) => ({
-      key,
-      label: v.label,
-      remaining: v.remaining,
-      priority: v.priority,
-      tags: v.tags,
-      buyId: v.buyId,
-    }))
+  return [...byBuyId.values()]
     .sort(
       (a, b) =>
         b.priority - a.priority ||
         b.remaining - a.remaining ||
-        a.label.localeCompare(b.label),
+        a.label.localeCompare(b.label) ||
+        a.buyId.localeCompare(b.buyId),
     )
     .map(({ key, label, remaining, tags, buyId }) => ({
       key,
       label,
       remaining,
       tags: tags ?? null,
-      buyId: buyId ?? null,
+      buyId,
     }))
 }
 

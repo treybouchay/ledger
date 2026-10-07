@@ -251,16 +251,23 @@ function rankSuggestionMatches(
     .map((x) => x.s)
 }
 
-/** Search + browse open inventory when matching a sell to a buy. */
+/** Search + browse open inventory when matching a sell to buy(s). */
 function InventoryMatchPicker({
   suggestions,
-  selectedKey,
+  selectedKey = '',
+  selectedKeys,
+  multiSelect = false,
   onPick,
   onClear,
   onEnterManually,
 }: {
   suggestions: SellItemSuggestion[]
-  selectedKey: string
+  /** Single-select: active suggestion key (or normalized label for edit). */
+  selectedKey?: string
+  /** Multi-select: active suggestion keys. */
+  selectedKeys?: string[]
+  /** Allow picking several buys for one sell. */
+  multiSelect?: boolean
   onPick: (s: SellItemSuggestion) => void
   onClear?: () => void
   /** Skip matching and fill tags yourself (compose sell flow). */
@@ -271,11 +278,25 @@ function InventoryMatchPicker({
   const [browseQuery, setBrowseQuery] = useState('')
 
   const qTrimmed = query.trim()
-  const preview = rankSuggestionMatches(suggestions, query, 3)
+  const preview = rankSuggestionMatches(suggestions, query, multiSelect ? 6 : 3)
   const browseFiltered = suggestions.filter((s) =>
     suggestionMatchesQuery(s, browseQuery),
   )
-  const selected = suggestions.find((s) => s.key === selectedKey) ?? null
+  const activeKeys = multiSelect
+    ? new Set(selectedKeys ?? [])
+    : new Set(
+        selectedKey
+          ? suggestions
+              .filter(
+                (s) =>
+                  s.key === selectedKey ||
+                  normalizeCashItem(s.label) === selectedKey,
+              )
+              .map((s) => s.key)
+          : [],
+      )
+  const selected = suggestions.filter((s) => activeKeys.has(s.key))
+  const openValueTotal = selected.reduce((sum, s) => sum + s.remaining, 0)
 
   useEffect(() => {
     if (!browseOpen) return
@@ -287,7 +308,7 @@ function InventoryMatchPicker({
   }, [browseOpen])
 
   function renderRow(s: SellItemSuggestion, compact = false) {
-    const active = selectedKey === s.key
+    const active = activeKeys.has(s.key)
     return (
       <button
         key={s.key}
@@ -296,8 +317,12 @@ function InventoryMatchPicker({
         aria-pressed={active}
         onClick={() => {
           onPick(s)
-          setBrowseOpen(false)
-          setQuery('')
+          if (!multiSelect) {
+            setBrowseOpen(false)
+            setQuery('')
+          } else {
+            setQuery('')
+          }
         }}
       >
         <span className="inventory-match-row-main">
@@ -310,7 +335,7 @@ function InventoryMatchPicker({
           </span>
         </span>
         <span className="inventory-match-row-check" aria-hidden>
-          {active ? '✓' : ''}
+          {active ? '✓' : multiSelect ? '+' : ''}
         </span>
       </button>
     )
@@ -319,8 +344,16 @@ function InventoryMatchPicker({
   return (
     <div className="inventory-match">
       <div className="inventory-match-header">
-        <span className="inventory-match-title">Match inventory</span>
-        {selected ? (
+        <span className="inventory-match-title">
+          Match inventory
+          {multiSelect ? (
+            <span className="inventory-match-title-hint">
+              {' '}
+              · pick several for one sale
+            </span>
+          ) : null}
+        </span>
+        {selected.length > 0 ? (
           <button
             type="button"
             className="ghost inventory-match-clear"
@@ -329,17 +362,29 @@ function InventoryMatchPicker({
               setQuery('')
             }}
           >
-            Clear match
+            {multiSelect && selected.length > 1
+              ? 'Clear matches'
+              : 'Clear match'}
           </button>
         ) : null}
       </div>
-      {selected ? (
+      {selected.length > 0 ? (
         <div className="inventory-match-selected">
-          <strong>{selected.label}</strong>
-          <GearTagPills tags={selected.tags} />
-          <span className="inventory-match-row-meta">
-            Open value {formatMoney(selected.remaining)}
-          </span>
+          {selected.map((s) => (
+            <div key={s.key} className="inventory-match-selected-item">
+              <strong>{s.label}</strong>
+              <GearTagPills tags={s.tags} />
+              <span className="inventory-match-row-meta">
+                Open value {formatMoney(s.remaining)}
+              </span>
+            </div>
+          ))}
+          {multiSelect && selected.length > 1 ? (
+            <span className="inventory-match-row-meta inventory-match-selected-total">
+              {selected.length} items · open value{' '}
+              {formatMoney(openValueTotal)}
+            </span>
+          ) : null}
         </div>
       ) : null}
       <label className="inventory-match-search">
@@ -403,7 +448,11 @@ function InventoryMatchPicker({
             <div className="cash-link-modal-header">
               <div>
                 <h3 id="inventory-browse-title">Browse inventory</h3>
-                <p>Pick a buy to match this sell</p>
+                <p>
+                  {multiSelect
+                    ? 'Select one or more buys for this sale'
+                    : 'Pick a buy to match this sell'}
+                </p>
               </div>
               <button
                 type="button"
@@ -449,6 +498,9 @@ function InventoryMatchPicker({
                 onClick={() => setBrowseOpen(false)}
               >
                 Done
+                {multiSelect && selected.length > 0
+                  ? ` (${selected.length})`
+                  : ''}
               </button>
             </div>
           </div>
@@ -1962,9 +2014,9 @@ function CashLedger({
   const [amount, setAmount] = useState('')
   const [otherItem, setOtherItem] = useState('')
   const [soldVia, setSoldVia] = useState<GearSoldVia | null>(null)
-  /** When set, new sell is linked to this buy after insert. */
-  const [matchBuyId, setMatchBuyId] = useState<string | null>(null)
-  const [matchKey, setMatchKey] = useState('')
+  /** Buys linked to the new sell after insert (multi-item sales). */
+  const [matchBuyIds, setMatchBuyIds] = useState<string[]>([])
+  const [matchKeys, setMatchKeys] = useState<string[]>([])
   const [sellDetailsOpen, setSellDetailsOpen] = useState(false)
   const [showBuys, setShowBuys] = useState(true)
   const [showSells, setShowSells] = useState(true)
@@ -2078,24 +2130,55 @@ function CashLedger({
     })
   }
 
+  function syncTagsFromMatchKeys(keys: string[]) {
+    if (keys.length === 0) {
+      setTags(emptyGearTags())
+      return
+    }
+    const picked = keys
+      .map((key) => sellItemSuggestions.find((s) => s.key === key))
+      .filter((s): s is SellItemSuggestion => Boolean(s))
+    if (picked.length === 0) {
+      setTags(emptyGearTags())
+      return
+    }
+    if (picked.length === 1) {
+      applySellSuggestion(picked[0], setTags)
+      return
+    }
+    const labels = picked.map((s) => s.label.trim()).filter(Boolean)
+    setTags({
+      ...emptyGearTags(),
+      kind: 'other',
+      detail: labels.join(' · '),
+    })
+  }
+
   function pickInventoryMatch(s: SellItemSuggestion) {
-    applySellSuggestion(s, setTags)
-    setMatchKey(s.key)
-    setMatchBuyId(s.buyId ?? null)
+    const has = matchKeys.includes(s.key)
+    const nextKeys = has
+      ? matchKeys.filter((k) => k !== s.key)
+      : [...matchKeys, s.key]
+    const nextBuyIds = nextKeys
+      .map((k) => sellItemSuggestions.find((x) => x.key === k)?.buyId)
+      .filter((id): id is string => Boolean(id))
+    setMatchKeys(nextKeys)
+    setMatchBuyIds(nextBuyIds)
+    syncTagsFromMatchKeys(nextKeys)
     setSellDetailsOpen(false)
   }
 
   function clearInventoryMatch() {
-    setMatchKey('')
-    setMatchBuyId(null)
+    setMatchKeys([])
+    setMatchBuyIds([])
     setTags(emptyGearTags())
     setSellDetailsOpen(false)
   }
 
   function resetComposeForMode(next: 'in' | 'out' | 'other') {
     setMode(next)
-    setMatchKey('')
-    setMatchBuyId(null)
+    setMatchKeys([])
+    setMatchBuyIds([])
     setSellDetailsOpen(false)
     setOtherItem('')
     if (next !== 'in') setSoldVia(null)
@@ -2622,16 +2705,20 @@ function CashLedger({
       notes: composeNotes.trim() || null,
       createdAt: new Date().toISOString(),
     }
-    let next = autoLinkCashMoves(insertCashMoveSorted(moves, move))
-    if (mode === 'in' && matchBuyId) {
-      next = linkCashMoves(next, move.id, matchBuyId)
+    let next = insertCashMoveSorted(moves, move)
+    if (mode === 'in' && matchBuyIds.length > 0) {
+      for (const buyId of matchBuyIds) {
+        next = linkCashMoves(next, move.id, buyId)
+      }
+    } else {
+      next = autoLinkCashMoves(next)
     }
     onChangeMoves(next)
     setTags(emptyGearTags())
     setAmount('')
     setComposeNotes('')
-    setMatchKey('')
-    setMatchBuyId(null)
+    setMatchKeys([])
+    setMatchBuyIds([])
     setSellDetailsOpen(false)
     if (mode === 'in') setSoldVia(null)
   }
@@ -3603,11 +3690,12 @@ function CashLedger({
             <div className="gear-tag-step cash-compose-step">
               <InventoryMatchPicker
                 suggestions={sellItemSuggestions}
-                selectedKey={matchKey}
+                multiSelect
+                selectedKeys={matchKeys}
                 onPick={pickInventoryMatch}
                 onClear={clearInventoryMatch}
                 onEnterManually={
-                  !matchKey && !sellDetailsOpen
+                  matchKeys.length === 0 && !sellDetailsOpen
                     ? () => setSellDetailsOpen(true)
                     : undefined
                 }
@@ -3617,9 +3705,13 @@ function CashLedger({
 
           {mode === 'out' ||
           (mode === 'in' &&
-            (matchKey || sellDetailsOpen || Boolean(tags.kind))) ? (
+            (matchKeys.length > 0 ||
+              sellDetailsOpen ||
+              Boolean(tags.kind))) ? (
             <div className="gear-tag-step cash-compose-step">
-              {mode === 'in' && matchKey && !sellDetailsOpen ? (
+              {mode === 'in' &&
+              matchKeys.length > 0 &&
+              !sellDetailsOpen ? (
                 <button
                   type="button"
                   className="ghost cash-compose-reveal"
@@ -3630,16 +3722,7 @@ function CashLedger({
               ) : (
                 <GearItemTagsFields
                   value={tags}
-                  onChange={(next) => {
-                    setTags(next)
-                    if (matchKey) {
-                      const label = formatGearItemLabel(next)
-                      if (normalizeCashItem(label) !== matchKey) {
-                        setMatchKey('')
-                        setMatchBuyId(null)
-                      }
-                    }
-                  }}
+                  onChange={setTags}
                   progressive
                 />
               )}
@@ -3671,7 +3754,7 @@ function CashLedger({
           <div className="cash-compose-actions">
             <p className="hint">
               {mode === 'in'
-                ? 'Match inventory or enter tags · creates a sell row'
+                ? 'Match one or more buys (or enter tags) · creates one sell row'
                 : mode === 'other'
                   ? 'Describe the spend · reduces cash on hand, not inventory'
                   : 'Fill brand → model → type step-by-step · creates a buy row'}
