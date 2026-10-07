@@ -296,7 +296,12 @@ function InventoryMatchPicker({
           : [],
       )
   const selected = suggestions.filter((s) => activeKeys.has(s.key))
+  const available = suggestions.filter((s) => !activeKeys.has(s.key))
   const openValueTotal = selected.reduce((sum, s) => sum + s.remaining, 0)
+  const addMorePreview =
+    multiSelect && selected.length > 0 && !qTrimmed
+      ? available.slice(0, 4)
+      : []
 
   useEffect(() => {
     if (!browseOpen) return
@@ -306,6 +311,11 @@ function InventoryMatchPicker({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [browseOpen])
+
+  function openBrowse(seed = '') {
+    setBrowseQuery(seed)
+    setBrowseOpen(true)
+  }
 
   function renderRow(s: SellItemSuggestion, compact = false) {
     const active = activeKeys.has(s.key)
@@ -372,11 +382,24 @@ function InventoryMatchPicker({
         <div className="inventory-match-selected">
           {selected.map((s) => (
             <div key={s.key} className="inventory-match-selected-item">
-              <strong>{s.label}</strong>
-              <GearTagPills tags={s.tags} />
-              <span className="inventory-match-row-meta">
-                Open value {formatMoney(s.remaining)}
-              </span>
+              <div className="inventory-match-selected-body">
+                <strong>{s.label}</strong>
+                <GearTagPills tags={s.tags} />
+                <span className="inventory-match-row-meta">
+                  Open value {formatMoney(s.remaining)}
+                </span>
+              </div>
+              {multiSelect ? (
+                <button
+                  type="button"
+                  className="ghost inventory-match-remove"
+                  title={`Remove ${s.label}`}
+                  aria-label={`Remove ${s.label}`}
+                  onClick={() => onPick(s)}
+                >
+                  Remove
+                </button>
+              ) : null}
             </div>
           ))}
           {multiSelect && selected.length > 1 ? (
@@ -384,6 +407,15 @@ function InventoryMatchPicker({
               {selected.length} items · open value{' '}
               {formatMoney(openValueTotal)}
             </span>
+          ) : null}
+          {multiSelect && available.length > 0 ? (
+            <button
+              type="button"
+              className="primary inventory-match-add-another"
+              onClick={() => openBrowse()}
+            >
+              Add another item
+            </button>
           ) : null}
         </div>
       ) : null}
@@ -393,7 +425,11 @@ function InventoryMatchPicker({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search brand, type, model, size…"
+          placeholder={
+            multiSelect && selected.length > 0
+              ? 'Search to add another item…'
+              : 'Search brand, type, model, size…'
+          }
           autoComplete="off"
         />
       </label>
@@ -405,18 +441,26 @@ function InventoryMatchPicker({
         <div className="inventory-match-list" role="list">
           {preview.map((s) => renderRow(s, true))}
         </div>
+      ) : addMorePreview.length > 0 ? (
+        <div className="inventory-match-add-more">
+          <span className="inventory-match-add-more-label">
+            Tap to add to this sale
+          </span>
+          <div className="inventory-match-list" role="list">
+            {addMorePreview.map((s) => renderRow(s, true))}
+          </div>
+        </div>
       ) : null}
       <div className="inventory-match-actions">
         {suggestions.length > 0 ? (
           <button
             type="button"
             className="ghost inventory-match-browse"
-            onClick={() => {
-              setBrowseQuery(query)
-              setBrowseOpen(true)
-            }}
+            onClick={() => openBrowse(query)}
           >
-            Browse all inventory
+            {multiSelect && selected.length > 0
+              ? 'Browse to add more'
+              : 'Browse all inventory'}
           </button>
         ) : null}
         {onEnterManually ? (

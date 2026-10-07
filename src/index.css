@@ -5465,8 +5465,10 @@ select {
 }
 
 .inventory-match-selected-item {
-  display: grid;
-  gap: 0.2rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
 }
 
 .inventory-match-selected-item + .inventory-match-selected-item {
@@ -5474,13 +5476,44 @@ select {
   border-top: 1px solid color-mix(in srgb, var(--good) 22%, var(--line));
 }
 
+.inventory-match-selected-body {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
 .inventory-match-selected strong {
   font-size: 0.92rem;
+}
+
+.inventory-match-remove {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.45rem;
+  margin-top: 0.1rem;
+}
+
+.inventory-match-add-another {
+  justify-self: start;
+  margin-top: 0.15rem;
+  font-size: 0.88rem;
+  padding: 0.45rem 0.85rem;
 }
 
 .inventory-match-selected-total {
   padding-top: 0.15rem;
   font-weight: 550;
+}
+
+.inventory-match-add-more {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.inventory-match-add-more-label {
+  font-size: 0.78rem;
+  font-weight: 550;
+  color: var(--ink-muted);
 }
 
 .inventory-match-title-hint {
