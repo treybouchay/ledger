@@ -5204,6 +5204,31 @@ select {
   grid-template-columns: 1fr;
 }
 
+.cash-apply-expense {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft, #3d4a45);
+  cursor: pointer;
+}
+
+.cash-apply-expense input {
+  margin-top: 0.2rem;
+}
+
+.cash-via-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted, #6a7872);
+  margin-bottom: 0.35rem;
+}
+
+.statement-charges-hint {
+  margin: 0 0 0.65rem;
+}
+
 .cash-via-field {
   display: grid;
   gap: 0.35rem;

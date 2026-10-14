@@ -302,6 +302,11 @@ export interface GearCashMove {
   notes?: string | null
   /** When the row was added to the ledger (ISO). */
   createdAt?: string | null
+  /**
+   * Household expense Transaction created from a non-gear spend so it
+   * counts on Month overview / Categories for that month.
+   */
+  ledgerTransactionId?: string | null
 }
 
 /** Personal gear the user decided to keep (not flip / sell). */

@@ -51,8 +51,10 @@ import {
   writeGearSubTab,
   type GearSubTab,
 } from '../lib/nav'
+import { CategoryPicker } from './CategoryPicker'
 import { GearItemTagsFields, GearTagPills } from './GearItemTags'
 import type {
+  CategoryId,
   GearCashMove,
   GearItemTags,
   GearKeepItem,
@@ -61,6 +63,18 @@ import type {
   GearSoldVia,
   GearState,
 } from '../types'
+
+/** Create a household expense from a non-gear cash-out (Month overview). */
+export type ApplyNonGearExpenseFn = (input: {
+  cashMoveId: string
+  date: string
+  amount: number
+  merchant: string
+  categoryId: CategoryId
+  notes?: string | null
+}) => string
+
+export type RemoveNonGearExpenseFn = (transactionId: string) => void
 
 const SOLD_VIA: {
   id: GearSoldVia
@@ -2040,6 +2054,8 @@ function CashLedger({
   onViewReceipt,
   itemTagFilter,
   onItemTagFilterChange,
+  onApplyNonGearExpense,
+  onRemoveNonGearExpense,
 }: {
   openingBalance: number
   moves: GearCashMove[]
@@ -2051,12 +2067,16 @@ function CashLedger({
   onViewReceipt: () => void
   itemTagFilter: ItemTagFilter
   onItemTagFilterChange: (next: ItemTagFilter) => void
+  onApplyNonGearExpense?: ApplyNonGearExpenseFn
+  onRemoveNonGearExpense?: RemoveNonGearExpenseFn
 }) {
   const [mode, setMode] = useState<'in' | 'out' | 'other'>('out')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [tags, setTags] = useState<GearItemTags>(() => emptyGearTags())
   const [amount, setAmount] = useState('')
   const [otherItem, setOtherItem] = useState('')
+  const [otherCategoryId, setOtherCategoryId] = useState<CategoryId>('other')
+  const [applyOtherToExpenses, setApplyOtherToExpenses] = useState(true)
   const [soldVia, setSoldVia] = useState<GearSoldVia | null>(null)
   /** Buys linked to the new sell after insert (multi-item sales). */
   const [matchBuyIds, setMatchBuyIds] = useState<string[]>([])
@@ -2710,8 +2730,21 @@ function CashLedger({
     if (mode === 'other') {
       const label = otherItem.trim()
       if (!label) return
+      const moveId = `cash-${Date.now()}`
+      let ledgerTransactionId: string | null = null
+      if (applyOtherToExpenses && onApplyNonGearExpense) {
+        const expenseDate = date || new Date().toISOString().slice(0, 10)
+        ledgerTransactionId = onApplyNonGearExpense({
+          cashMoveId: moveId,
+          date: expenseDate,
+          amount: n,
+          merchant: label,
+          categoryId: otherCategoryId,
+          notes: composeNotes.trim() || null,
+        })
+      }
       const move: GearCashMove = {
-        id: `cash-${Date.now()}`,
+        id: moveId,
         date: date || null,
         type: 'OTHER',
         item: label,
@@ -2725,6 +2758,7 @@ function CashLedger({
         listingStatus: null,
         notes: composeNotes.trim() || null,
         createdAt: new Date().toISOString(),
+        ledgerTransactionId,
       }
       onChangeMoves(insertCashMoveSorted(moves, move))
       setOtherItem('')
@@ -2784,7 +2818,28 @@ function CashLedger({
       setHighlightSourceId(null)
       setPairAnimating(false)
     }
+    const doomed = moves.find((m) => m.id === id)
+    if (doomed?.ledgerTransactionId && onRemoveNonGearExpense) {
+      onRemoveNonGearExpense(doomed.ledgerTransactionId)
+    }
     onChangeMoves(removeCashMove(moves, id))
+  }
+
+  function applyNonGearRowToExpenses(move: GearCashMove) {
+    if (!onApplyNonGearExpense || !isNonGearSpend(move)) return
+    if (move.ledgerTransactionId) return
+    const expenseDate =
+      move.date?.trim().slice(0, 10) ||
+      new Date().toISOString().slice(0, 10)
+    const txId = onApplyNonGearExpense({
+      cashMoveId: move.id,
+      date: expenseDate,
+      amount: move.amount,
+      merchant: (move.item ?? '').trim() || 'Non-gear spend',
+      categoryId: 'other',
+      notes: move.notes ?? null,
+    })
+    patchMove(move.id, { ledgerTransactionId: txId })
   }
 
   function patchMove(id: string, patch: Partial<GearCashMove>) {
@@ -3087,6 +3142,29 @@ function CashLedger({
               >
                 Future date
               </span>
+            ) : null}
+            {nonGear && move.ledgerTransactionId ? (
+              <span
+                className="status-tag status-tag-listed"
+                title="Counts on Month overview for this date’s month"
+              >
+                On expenses
+              </span>
+            ) : null}
+            {nonGear &&
+            !move.ledgerTransactionId &&
+            onApplyNonGearExpense ? (
+              <button
+                type="button"
+                className="ghost compact"
+                title="Add this spend to Month overview expenses"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  applyNonGearRowToExpenses(move)
+                }}
+              >
+                Apply to expenses
+              </button>
             ) : null}
             {nonGear ? (
               <span
@@ -3727,6 +3805,29 @@ function CashLedger({
                   required
                 />
               </label>
+              {onApplyNonGearExpense ? (
+                <>
+                  <label className="cash-apply-expense">
+                    <input
+                      type="checkbox"
+                      checked={applyOtherToExpenses}
+                      onChange={(e) =>
+                        setApplyOtherToExpenses(e.target.checked)
+                      }
+                    />
+                    Also add to month expenses (Month overview / Categories)
+                  </label>
+                  {applyOtherToExpenses ? (
+                    <div className="cash-via-field">
+                      <span className="cash-via-label">Expense category</span>
+                      <CategoryPicker
+                        value={otherCategoryId}
+                        onChange={setOtherCategoryId}
+                      />
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
             </div>
           ) : null}
 
@@ -3800,7 +3901,9 @@ function CashLedger({
               {mode === 'in'
                 ? 'Match one or more buys (or enter tags) · creates one sell row'
                 : mode === 'other'
-                  ? 'Describe the spend · reduces cash on hand, not inventory'
+                  ? applyOtherToExpenses
+                    ? 'Describe the spend · reduces cash on hand and adds a Month overview expense'
+                    : 'Describe the spend · reduces cash on hand only (not inventory)'
                   : 'Fill brand → model → type step-by-step · creates a buy row'}
             </p>
             <button
@@ -5030,10 +5133,14 @@ export function GearFlipsPanel({
   state,
   onChange,
   onReset,
+  onApplyNonGearExpense,
+  onRemoveNonGearExpense,
 }: {
   state: GearState
   onChange: (next: GearState) => void
   onReset: () => void
+  onApplyNonGearExpense?: ApplyNonGearExpenseFn
+  onRemoveNonGearExpense?: RemoveNonGearExpenseFn
 }) {
   const [sub, setSub] = useState<GearSubTab>(() => readGearSubTab())
   const [cashItemTagFilter, setCashItemTagFilter] =
@@ -5274,6 +5381,8 @@ export function GearFlipsPanel({
           onViewReceipt={() => setSub('history')}
           itemTagFilter={cashItemTagFilter}
           onItemTagFilterChange={setCashItemTagFilter}
+          onApplyNonGearExpense={onApplyNonGearExpense}
+          onRemoveNonGearExpense={onRemoveNonGearExpense}
         />
       ) : null}
 

@@ -27,6 +27,7 @@ export function StatementFilePreview({
   fileName,
   storedFileNames,
   householdId,
+  onActiveFileChange,
 }: {
   importId: string
   /** From StatementImport — false/undefined for legacy uploads. */
@@ -36,6 +37,8 @@ export function StatementFilePreview({
   storedFileNames?: string[]
   /** When signed in, fetch from cloud if not in this browser. */
   householdId?: string | null
+  /** Fires when the visible screenshot/page changes (for filtering charges). */
+  onActiveFileChange?: (fileName: string, index: number) => void
 }) {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [index, setIndex] = useState(0)
@@ -53,6 +56,10 @@ export function StatementFilePreview({
   useEffect(() => {
     setIndex(0)
   }, [importId])
+
+  useEffect(() => {
+    onActiveFileChange?.(names[active] ?? activeName, active)
+  }, [active, activeName, names, onActiveFileChange])
 
   useEffect(() => {
     let cancelled = false

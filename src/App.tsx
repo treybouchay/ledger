@@ -242,6 +242,10 @@ export default function App() {
     CategoryId | 'all'
   >('all')
   const [viewingImportId, setViewingImportId] = useState<string | null>(null)
+  /** Active screenshot filename while viewing a multi-image import. */
+  const [viewingScreenshotFile, setViewingScreenshotFile] = useState<
+    string | null
+  >(null)
   const [dupeCheckOpen, setDupeCheckOpen] = useState(false)
   const [dupeCheckKept, setDupeCheckKept] = useState<Set<string>>(
     () => new Set(),
@@ -893,7 +897,7 @@ export default function App() {
     [imports, viewingImportId],
   )
 
-  const statementTransactions = useMemo(() => {
+  const statementTransactionsAll = useMemo(() => {
     if (!viewingImportId) return []
     return transactions
       .filter((t) => t.importId === viewingImportId)
@@ -903,15 +907,44 @@ export default function App() {
       )
   }, [transactions, viewingImportId])
 
+  const statementTransactions = useMemo(() => {
+    if (!viewingImport) return statementTransactionsAll
+    const files = viewingImport.storedFileNames?.filter(Boolean) ?? []
+    // Multi-screenshot batch: only show charges from the visible page when
+    // rows carry a per-file sourceFile (new imports). Legacy rows without a
+    // matching label stay visible so nothing disappears.
+    if (
+      viewingImport.sourceKind === 'screenshot' &&
+      files.length > 1 &&
+      viewingScreenshotFile
+    ) {
+      const matched = statementTransactionsAll.filter(
+        (t) => t.sourceFile === viewingScreenshotFile,
+      )
+      if (matched.length > 0) return matched
+      // Fallback: if nothing matched (old imports stamped with batch name),
+      // show all so the user isn't left with an empty list.
+      const anyPerFile = statementTransactionsAll.some(
+        (t) => t.sourceFile && files.includes(t.sourceFile),
+      )
+      if (anyPerFile) return matched
+    }
+    return statementTransactionsAll
+  }, [
+    statementTransactionsAll,
+    viewingImport,
+    viewingScreenshotFile,
+  ])
+
   const statementMonthBreakdown = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const t of statementTransactions) {
+    for (const t of statementTransactionsAll) {
       counts.set(t.monthId, (counts.get(t.monthId) ?? 0) + 1)
     }
     return [...counts.entries()]
       .map(([id, count]) => ({ monthId: id, count }))
       .sort((a, b) => a.monthId.localeCompare(b.monthId))
-  }, [statementTransactions])
+  }, [statementTransactionsAll])
 
   const importLiveCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -1101,7 +1134,8 @@ export default function App() {
       isCashIn: row.isCashIn ?? false,
       source: 'csv',
       importId,
-      sourceFile: meta.fileName,
+      // Per-screenshot label when OCR’d from a batch; else the import file name.
+      sourceFile: row.sourceLabel?.trim() || meta.fileName,
     }))
 
     const accountCounts = new Map<string, number>()
@@ -1248,6 +1282,7 @@ export default function App() {
 
   function closeStatementView() {
     setViewingImportId(null)
+    setViewingScreenshotFile(null)
   }
 
   function openStatement(importId: string) {
@@ -3952,6 +3987,35 @@ export default function App() {
           state={gear}
           onChange={setGear}
           onReset={() => setGear(resetGearState())}
+          onApplyNonGearExpense={({
+            date,
+            amount,
+            merchant,
+            categoryId,
+            notes,
+          }) => {
+            const id = `gear-other-${Date.now()}`
+            const month = date.slice(0, 7) || monthId
+            const tx: Transaction = {
+              id,
+              personId: 'trevor',
+              monthId: month,
+              date,
+              amount,
+              merchant,
+              accountId: 'other',
+              categoryId,
+              notes: notes ?? undefined,
+              source: 'manual',
+            }
+            setTransactions((prev) => [...prev, tx])
+            return id
+          }}
+          onRemoveNonGearExpense={(transactionId) => {
+            setTransactions((prev) =>
+              prev.filter((t) => t.id !== transactionId),
+            )
+          }}
         />
       )}
 
@@ -4210,8 +4274,8 @@ export default function App() {
                   {PEOPLE.find((p) => p.id === viewingImport.personId)?.name ??
                     viewingImport.personId}
                   {' · '}
-                  {statementTransactions.length} charge
-                  {statementTransactions.length === 1 ? '' : 's'}
+                  {statementTransactionsAll.length} charge
+                  {statementTransactionsAll.length === 1 ? '' : 's'}
                   {' · '}
                   net {formatMoney(viewingImport.netAmount)}
                   {' · '}
@@ -4319,21 +4383,39 @@ export default function App() {
                   fileName={viewingImport.fileName}
                   storedFileNames={viewingImport.storedFileNames}
                   householdId={cloudContext?.householdId ?? null}
+                  onActiveFileChange={(name) =>
+                    setViewingScreenshotFile(name)
+                  }
                 />
                 <div className="statement-charges">
                   {statementTransactions.length === 0 ? (
                     <p className="empty-note">
-                      No charges found for this import (it may have been
-                      removed).
+                      {statementTransactionsAll.length > 0
+                        ? 'No charges matched this screenshot — try another page, or re-upload so charges are tagged per image.'
+                        : 'No charges found for this import (it may have been removed).'}
                     </p>
                   ) : (
-                    <TransactionTable
-                      transactions={statementTransactions}
-                      showCategory
-                      showAccount
-                      onUpdate={updateTransaction}
-                      onDelete={deleteTransaction}
-                    />
+                    <>
+                      {viewingImport.sourceKind === 'screenshot' &&
+                      (viewingImport.storedFileNames?.length ?? 0) > 1 ? (
+                        <p className="hint statement-charges-hint">
+                          Showing {statementTransactions.length} charge
+                          {statementTransactions.length === 1 ? '' : 's'} from
+                          this screenshot
+                          {statementTransactionsAll.length !==
+                          statementTransactions.length
+                            ? ` (${statementTransactionsAll.length} in the whole batch)`
+                            : ''}
+                        </p>
+                      ) : null}
+                      <TransactionTable
+                        transactions={statementTransactions}
+                        showCategory
+                        showAccount
+                        onUpdate={updateTransaction}
+                        onDelete={deleteTransaction}
+                      />
+                    </>
                   )}
                 </div>
               </div>

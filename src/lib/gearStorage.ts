@@ -585,6 +585,10 @@ function migrateLegacyCash(raw: unknown): GearCashMove[] | null {
             : null,
         notes: readCashNotes(r.notes),
         createdAt: typeof r.createdAt === 'string' ? r.createdAt : null,
+        ledgerTransactionId:
+          typeof r.ledgerTransactionId === 'string'
+            ? r.ledgerTransactionId
+            : null,
       })
       continue
     }
@@ -616,6 +620,10 @@ function migrateLegacyCash(raw: unknown): GearCashMove[] | null {
           : null,
       notes: readCashNotes(r.notes),
       createdAt: typeof r.createdAt === 'string' ? r.createdAt : null,
+      ledgerTransactionId:
+        typeof r.ledgerTransactionId === 'string'
+          ? r.ledgerTransactionId
+          : null,
     })
   }
   return out.length ? out : null
@@ -829,11 +837,22 @@ export function realizedFlipProfitForMonth(
     const monthSells = stats.sells.filter(
       (s) => (s.date?.trim().slice(0, 7) ?? '') === monthId,
     )
+    if (!monthSells.length) continue
+    // Only this month's sell cash — don't pull other months' sells into the view.
+    const monthSold =
+      Math.round(
+        monthSells.reduce((sum, s) => sum + s.amount, 0) * 100,
+      ) / 100
+    const totalSold = stats.sold > 0 ? stats.sold : monthSold
+    const share = totalSold > 0 ? monthSold / totalSold : 1
+    const monthPurchased =
+      Math.round(stats.purchased * share * 100) / 100
+    const monthProfit = Math.round((monthSold - monthPurchased) * 100) / 100
     groupCount += 1
     sellCount += monthSells.length
-    profit += stats.profit
-    sold += stats.sold
-    purchased += stats.purchased
+    profit += monthProfit
+    sold += monthSold
+    purchased += monthPurchased
     const { label, tags } = flipRowLabel(stats.buys, stats.sells)
     const sellDates = monthSells
       .map((s) => s.date?.trim().slice(0, 10) ?? '')
@@ -843,9 +862,9 @@ export function realizedFlipProfitForMonth(
       linkGroupId: groupId,
       label,
       tags,
-      sold: stats.sold,
-      purchased: stats.purchased,
-      profit: stats.profit,
+      sold: monthSold,
+      purchased: monthPurchased,
+      profit: monthProfit,
       sellDate: sellDates[0] ?? sell.date?.trim().slice(0, 10) ?? '',
     })
   }
