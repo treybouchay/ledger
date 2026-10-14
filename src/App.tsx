@@ -88,6 +88,15 @@ import {
   possibleDuplicatePairKey,
   type PossibleDuplicatePair,
 } from './lib/duplicates'
+import { parseStatementFile } from './lib/parseStatementFile'
+import {
+  matchTransactionsToScreenshotRows,
+  sourceFileMatchesPage,
+} from './lib/screenshotChargeMatch'
+import {
+  statementFilePartKey,
+  statementFileNames,
+} from './lib/statementFiles'
 import { confirmRemove } from './lib/confirm'
 import {
   ensureHousehold,
@@ -95,6 +104,7 @@ import {
   migrateDeviceToCloud,
   fetchCloudRemoteStatus,
   isLocalCloudDirty,
+  resolveStatementFile,
   type CloudSyncRelation,
   pullCloudToDevice,
   type CloudContext,
@@ -246,6 +256,11 @@ export default function App() {
   const [viewingScreenshotFile, setViewingScreenshotFile] = useState<
     string | null
   >(null)
+  /** OCR-matched charge ids for legacy batch imports (no per-file sourceFile). */
+  const [screenshotOcrMatchIds, setScreenshotOcrMatchIds] = useState<
+    Set<string> | null
+  >(null)
+  const [screenshotOcrBusy, setScreenshotOcrBusy] = useState(false)
   const [dupeCheckOpen, setDupeCheckOpen] = useState(false)
   const [dupeCheckKept, setDupeCheckKept] = useState<Set<string>>(
     () => new Set(),
@@ -922,33 +937,167 @@ export default function App() {
       )
   }, [transactions, viewingImportId])
 
+  const statementPageFiles = useMemo(() => {
+    if (!viewingImport) return [] as string[]
+    return statementFileNames(
+      viewingImport.fileName,
+      viewingImport.storedFileNames,
+    )
+  }, [viewingImport])
+
+  const statementPageExactMatches = useMemo(() => {
+    if (!viewingScreenshotFile) return [] as typeof statementTransactionsAll
+    return statementTransactionsAll.filter((t) =>
+      sourceFileMatchesPage(t.sourceFile, viewingScreenshotFile),
+    )
+  }, [statementTransactionsAll, viewingScreenshotFile])
+
+  /** Charges not yet tagged to any individual page in this batch. */
+  const statementUntaggedForPages = useMemo(() => {
+    if (statementPageFiles.length <= 1) return [] as typeof statementTransactionsAll
+    return statementTransactionsAll.filter(
+      (t) =>
+        !statementPageFiles.some((f) =>
+          sourceFileMatchesPage(t.sourceFile, f),
+        ),
+    )
+  }, [statementTransactionsAll, statementPageFiles])
+
   const statementTransactions = useMemo(() => {
     if (!viewingImport) return statementTransactionsAll
-    const files = viewingImport.storedFileNames?.filter(Boolean) ?? []
-    // Multi-screenshot batch: only show charges from the visible page when
-    // rows carry a per-file sourceFile (new imports). Legacy rows without a
-    // matching label stay visible so nothing disappears.
+    // Multi-screenshot batch: only show charges from the visible page.
     if (
       viewingImport.sourceKind === 'screenshot' &&
-      files.length > 1 &&
+      statementPageFiles.length > 1 &&
       viewingScreenshotFile
     ) {
-      const matched = statementTransactionsAll.filter(
-        (t) => t.sourceFile === viewingScreenshotFile,
-      )
-      if (matched.length > 0) return matched
-      // Fallback: if nothing matched (old imports stamped with batch name),
-      // show all so the user isn't left with an empty list.
-      const anyPerFile = statementTransactionsAll.some(
-        (t) => t.sourceFile && files.includes(t.sourceFile),
-      )
-      if (anyPerFile) return matched
+      // Prefer exact per-file tags for this page.
+      if (
+        statementPageExactMatches.length > 0 &&
+        statementUntaggedForPages.length === 0
+      ) {
+        return statementPageExactMatches
+      }
+      if (
+        statementPageExactMatches.length > 0 &&
+        statementUntaggedForPages.length > 0
+      ) {
+        // Partially backfilled batch — show this page's tags plus OCR claim.
+        if (screenshotOcrMatchIds) {
+          const fromOcr = statementTransactionsAll.filter((t) =>
+            screenshotOcrMatchIds.has(t.id),
+          )
+          const byId = new Map<string, (typeof statementTransactionsAll)[0]>()
+          for (const t of statementPageExactMatches) byId.set(t.id, t)
+          for (const t of fromOcr) byId.set(t.id, t)
+          return [...byId.values()].sort(
+            (a, b) =>
+              b.date.localeCompare(a.date) || b.id.localeCompare(a.id),
+          )
+        }
+        return statementPageExactMatches
+      }
+      if (screenshotOcrMatchIds) {
+        return statementTransactionsAll.filter((t) =>
+          screenshotOcrMatchIds.has(t.id),
+        )
+      }
+      // OCR still running (or failed) — don't dump the whole batch.
+      return []
     }
     return statementTransactionsAll
   }, [
     statementTransactionsAll,
     viewingImport,
     viewingScreenshotFile,
+    statementPageFiles,
+    statementPageExactMatches,
+    statementUntaggedForPages,
+    screenshotOcrMatchIds,
+  ])
+
+  // Legacy multi-screenshot imports stamped every charge with the batch name.
+  // Re-OCR the visible page and match amounts/merchants so the list is page-scoped;
+  // then backfill sourceFile so later views skip OCR.
+  useEffect(() => {
+    if (!viewingImport || !viewingScreenshotFile) {
+      setScreenshotOcrMatchIds(null)
+      setScreenshotOcrBusy(false)
+      return
+    }
+    // Only OCR when this page has no tags yet and untagged charges remain.
+    const needsOcr =
+      viewingImport.sourceKind === 'screenshot' &&
+      statementPageFiles.length > 1 &&
+      statementUntaggedForPages.length > 0 &&
+      statementPageExactMatches.length === 0
+    if (!needsOcr) {
+      setScreenshotOcrMatchIds(null)
+      setScreenshotOcrBusy(false)
+      return
+    }
+
+    let cancelled = false
+    const pageFile = viewingScreenshotFile
+    const pageIndex = Math.max(0, statementPageFiles.indexOf(pageFile))
+    const partKey = statementFilePartKey(viewingImport.id, pageIndex)
+    const pool = statementUntaggedForPages
+
+    setScreenshotOcrBusy(true)
+    setScreenshotOcrMatchIds(null)
+
+    void (async () => {
+      try {
+        const stored = await resolveStatementFile(
+          partKey,
+          pageFile,
+          cloudContext?.householdId ?? null,
+        )
+        if (cancelled || !stored) {
+          if (!cancelled) {
+            setScreenshotOcrMatchIds(new Set())
+            setScreenshotOcrBusy(false)
+          }
+          return
+        }
+        const file = new File([stored.blob], stored.fileName || pageFile, {
+          type: stored.mimeType || 'image/jpeg',
+        })
+        const parsed = await parseStatementFile(file)
+        if (cancelled) return
+        const matched = matchTransactionsToScreenshotRows(pool, parsed.rows)
+        const ids = new Set(matched.map((t) => t.id))
+        setScreenshotOcrMatchIds(ids)
+        if (matched.length > 0) {
+          setTransactions((prev) => {
+            let changed = false
+            const next = prev.map((t) => {
+              if (!ids.has(t.id)) return t
+              if (sourceFileMatchesPage(t.sourceFile, pageFile)) return t
+              changed = true
+              return { ...t, sourceFile: pageFile }
+            })
+            return changed ? next : prev
+          })
+        }
+      } catch (err) {
+        console.error('[household-ledger] screenshot page match failed', err)
+        if (!cancelled) setScreenshotOcrMatchIds(new Set())
+      } finally {
+        if (!cancelled) setScreenshotOcrBusy(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    viewingImport,
+    viewingScreenshotFile,
+    statementPageFiles,
+    statementUntaggedForPages,
+    statementPageExactMatches.length,
+    cloudContext?.householdId,
   ])
 
   const statementMonthBreakdown = useMemo(() => {
@@ -1298,6 +1447,8 @@ export default function App() {
   function closeStatementView() {
     setViewingImportId(null)
     setViewingScreenshotFile(null)
+    setScreenshotOcrMatchIds(null)
+    setScreenshotOcrBusy(false)
   }
 
   function openStatement(importId: string) {
@@ -1325,7 +1476,7 @@ export default function App() {
   useEffect(() => {
     if (!viewingImportId) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setViewingImportId(null)
+      if (e.key === 'Escape') closeStatementView()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -4406,7 +4557,12 @@ export default function App() {
                   }
                 />
                 <div className="statement-charges">
-                  {statementTransactions.length === 0 ? (
+                  {screenshotOcrBusy &&
+                  statementTransactions.length === 0 ? (
+                    <p className="empty-note">
+                      Reading this screenshot to find its charges…
+                    </p>
+                  ) : statementTransactions.length === 0 ? (
                     <p className="empty-note">
                       {statementTransactionsAll.length > 0
                         ? 'No charges matched this screenshot — try another page, or re-upload so charges are tagged per image.'
@@ -4415,8 +4571,11 @@ export default function App() {
                   ) : (
                     <>
                       {viewingImport.sourceKind === 'screenshot' &&
-                      (viewingImport.storedFileNames?.length ?? 0) > 1 ? (
+                      statementPageFiles.length > 1 ? (
                         <p className="hint statement-charges-hint">
+                          {screenshotOcrBusy
+                            ? 'Matching this screenshot… · '
+                            : ''}
                           Showing {statementTransactions.length} charge
                           {statementTransactions.length === 1 ? '' : 's'} from
                           this screenshot
