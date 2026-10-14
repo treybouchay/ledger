@@ -5204,6 +5204,20 @@ select {
   grid-template-columns: 1fr;
 }
 
+.cash-apply-expense-panel {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0.35rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-soft, #d5eadc) 55%, #fff);
+  border: 1px solid color-mix(in srgb, var(--accent, #2f5d50) 18%, transparent);
+}
+
+.cash-apply-expense-btn {
+  justify-self: start;
+}
+
 .cash-apply-expense {
   display: flex;
   align-items: flex-start;

@@ -2129,6 +2129,8 @@ function CashLedger({
   const [editTags, setEditTags] = useState<GearItemTags>(() => emptyGearTags())
   const [editAmount, setEditAmount] = useState('')
   const [editItem, setEditItem] = useState('')
+  const [editExpenseCategoryId, setEditExpenseCategoryId] =
+    useState<CategoryId>('other')
   const [editSoldVia, setEditSoldVia] = useState<GearSoldVia | null>(null)
   const [editNotes, setEditNotes] = useState('')
   const [notesId, setNotesId] = useState<string | null>(null)
@@ -2527,6 +2529,7 @@ function CashLedger({
           },
     )
     setEditAmount(String(move.amount))
+    setEditExpenseCategoryId('other')
     setEditSoldVia(move.soldVia ?? null)
     setEditNotes(move.notes ?? '')
   }
@@ -2825,19 +2828,30 @@ function CashLedger({
     onChangeMoves(removeCashMove(moves, id))
   }
 
-  function applyNonGearRowToExpenses(move: GearCashMove) {
+  function applyNonGearRowToExpenses(
+    move: GearCashMove,
+    categoryId: CategoryId = 'other',
+  ) {
     if (!onApplyNonGearExpense || !isNonGearSpend(move)) return
     if (move.ledgerTransactionId) return
     const expenseDate =
       move.date?.trim().slice(0, 10) ||
+      editDate.trim().slice(0, 10) ||
       new Date().toISOString().slice(0, 10)
+    const merchant =
+      (editItem.trim() || move.item || '').trim() || 'Non-gear spend'
+    const amountN = Number(editAmount)
+    const amount =
+      editingId === move.id && Number.isFinite(amountN) && amountN > 0
+        ? amountN
+        : move.amount
     const txId = onApplyNonGearExpense({
       cashMoveId: move.id,
       date: expenseDate,
-      amount: move.amount,
-      merchant: (move.item ?? '').trim() || 'Non-gear spend',
-      categoryId: 'other',
-      notes: move.notes ?? null,
+      amount,
+      merchant,
+      categoryId,
+      notes: (editNotes.trim() || move.notes) ?? null,
     })
     patchMove(move.id, { ledgerTransactionId: txId })
   }
@@ -3016,6 +3030,38 @@ function CashLedger({
             />
           </label>
         </div>
+        {nonGear && onApplyNonGearExpense ? (
+          <div className="cash-apply-expense-panel">
+            {move.ledgerTransactionId ? (
+              <p className="hint">
+                Already on Month overview expenses for this date’s month.
+              </p>
+            ) : (
+              <>
+                <p className="hint">
+                  Add this to Month overview / Categories for{' '}
+                  {(editDate || move.date || '').slice(0, 7) || 'this month'}.
+                </p>
+                <div className="cash-via-field">
+                  <span className="cash-via-label">Expense category</span>
+                  <CategoryPicker
+                    value={editExpenseCategoryId}
+                    onChange={setEditExpenseCategoryId}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="primary cash-apply-expense-btn"
+                  onClick={() =>
+                    applyNonGearRowToExpenses(move, editExpenseCategoryId)
+                  }
+                >
+                  Apply to month expenses
+                </button>
+              </>
+            )}
+          </div>
+        ) : null}
         {!nonGear ? (
           <GearItemTagsFields value={editTags} onChange={setEditTags} />
         ) : null}
