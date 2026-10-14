@@ -554,6 +554,21 @@ export default function App() {
     saveUiMonth(monthId)
   }, [monthId])
 
+  // Non-gear “apply to expenses” used to create charges; treat them as refunds.
+  useEffect(() => {
+    const needsFix = transactions.some(
+      (t) => t.id.startsWith('gear-other-') && !t.isRefund,
+    )
+    if (!needsFix) return
+    setTransactions((prev) =>
+      prev.map((t) =>
+        t.id.startsWith('gear-other-') && !t.isRefund
+          ? { ...t, isRefund: true, isCashIn: undefined }
+          : t,
+      ),
+    )
+  }, [transactions])
+
   // Supabase auth + household bootstrap
   useEffect(() => {
     if (!isSupabaseConfigured()) return
@@ -4006,6 +4021,9 @@ export default function App() {
               accountId: 'other',
               categoryId,
               notes: notes ?? undefined,
+              // Non-gear “apply to expenses” = refund against that category
+              // (e.g. card payoff / cash out that shouldn’t count as spend).
+              isRefund: true,
               source: 'manual',
             }
             setTransactions((prev) => [...prev, tx])

@@ -64,7 +64,7 @@ import type {
   GearState,
 } from '../types'
 
-/** Create a household expense from a non-gear cash-out (Month overview). */
+/** Refund against a month expense category from a non-gear cash-out. */
 export type ApplyNonGearExpenseFn = (input: {
   cashMoveId: string
   date: string
@@ -3034,16 +3034,18 @@ function CashLedger({
           <div className="cash-apply-expense-panel">
             {move.ledgerTransactionId ? (
               <p className="hint">
-                Already on Month overview expenses for this date’s month.
+                Already applied as a refund on Month overview for this date’s
+                month.
               </p>
             ) : (
               <>
                 <p className="hint">
-                  Add this to Month overview / Categories for{' '}
-                  {(editDate || move.date || '').slice(0, 7) || 'this month'}.
+                  Refund this amount against Month overview / Categories for{' '}
+                  {(editDate || move.date || '').slice(0, 7) || 'this month'} —
+                  reduces net spend, does not add a charge.
                 </p>
                 <div className="cash-via-field">
-                  <span className="cash-via-label">Expense category</span>
+                  <span className="cash-via-label">Refund category</span>
                   <CategoryPicker
                     value={editExpenseCategoryId}
                     onChange={setEditExpenseCategoryId}
@@ -3056,7 +3058,7 @@ function CashLedger({
                     applyNonGearRowToExpenses(move, editExpenseCategoryId)
                   }
                 >
-                  Apply to month expenses
+                  Apply as refund
                 </button>
               </>
             )}
@@ -3192,9 +3194,9 @@ function CashLedger({
             {nonGear && move.ledgerTransactionId ? (
               <span
                 className="status-tag status-tag-listed"
-                title="Counts on Month overview for this date’s month"
+                title="Refunded against Month overview for this date’s month"
               >
-                On expenses
+                Refund applied
               </span>
             ) : null}
             {nonGear &&
@@ -3203,13 +3205,13 @@ function CashLedger({
               <button
                 type="button"
                 className="ghost compact"
-                title="Add this spend to Month overview expenses"
+                title="Refund this amount against Month overview expenses"
                 onClick={(e) => {
                   e.stopPropagation()
                   applyNonGearRowToExpenses(move)
                 }}
               >
-                Apply to expenses
+                Apply as refund
               </button>
             ) : null}
             {nonGear ? (
@@ -3861,11 +3863,11 @@ function CashLedger({
                         setApplyOtherToExpenses(e.target.checked)
                       }
                     />
-                    Also add to month expenses (Month overview / Categories)
+                    Also apply as refund on Month overview / Categories
                   </label>
                   {applyOtherToExpenses ? (
                     <div className="cash-via-field">
-                      <span className="cash-via-label">Expense category</span>
+                      <span className="cash-via-label">Refund category</span>
                       <CategoryPicker
                         value={otherCategoryId}
                         onChange={setOtherCategoryId}
@@ -3948,7 +3950,7 @@ function CashLedger({
                 ? 'Match one or more buys (or enter tags) · creates one sell row'
                 : mode === 'other'
                   ? applyOtherToExpenses
-                    ? 'Describe the spend · reduces cash on hand and adds a Month overview expense'
+                    ? 'Describe the spend · reduces cash on hand and refunds that amount on Month overview'
                     : 'Describe the spend · reduces cash on hand only (not inventory)'
                   : 'Fill brand → model → type step-by-step · creates a buy row'}
             </p>
