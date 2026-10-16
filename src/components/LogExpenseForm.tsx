@@ -24,6 +24,10 @@ interface LogExpenseFormProps {
   /** When editing — removes the transaction after confirm in the parent. */
   onDelete?: () => void
   defaultPersonId?: PersonId
+  /** Prefill account when creating (e.g. statement review popup). */
+  defaultAccountId?: AccountId
+  /** Prefill date when creating. */
+  defaultDate?: string
   /** When set, form edits this transaction instead of creating a new one. */
   initial?: Transaction
 }
@@ -33,6 +37,8 @@ export function LogExpenseForm({
   onCancel,
   onDelete,
   defaultPersonId = 'trevor',
+  defaultAccountId,
+  defaultDate,
   initial,
 }: LogExpenseFormProps) {
   const editing = Boolean(initial)
@@ -40,7 +46,10 @@ export function LogExpenseForm({
     initial?.personId ?? defaultPersonId,
   )
   const [date, setDate] = useState(
-    () => initial?.date ?? `${ACTIVE_MONTH_ID}-15`,
+    () =>
+      initial?.date ??
+      defaultDate ??
+      `${ACTIVE_MONTH_ID}-15`,
   )
   const [merchant, setMerchant] = useState(initial?.merchant ?? '')
   const [amount, setAmount] = useState(
@@ -51,7 +60,7 @@ export function LogExpenseForm({
   )
   const [accountId, setAccountId] = useState<AccountId>(() =>
     resolveAccountForPerson(
-      initial?.accountId ?? 'amex',
+      initial?.accountId ?? defaultAccountId ?? 'amex',
       initial?.personId ?? defaultPersonId,
     ),
   )

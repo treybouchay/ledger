@@ -147,7 +147,6 @@ import {
 import {
   readAppTab,
   writeAppTab,
-  writeGearSubTab,
   BUDGETING_TABS,
   SIDE_NAV_ITEMS,
   defaultTabForSide,
@@ -261,6 +260,8 @@ export default function App() {
     Set<string> | null
   >(null)
   const [screenshotOcrBusy, setScreenshotOcrBusy] = useState(false)
+  /** Manual expense form inside the statement/screenshot review popup. */
+  const [importManualOpen, setImportManualOpen] = useState(false)
   const [dupeCheckOpen, setDupeCheckOpen] = useState(false)
   const [dupeCheckKept, setDupeCheckKept] = useState<Set<string>>(
     () => new Set(),
@@ -1221,18 +1222,6 @@ export default function App() {
     Math.round((actualLeftover + gearCashNetForIncome) * 100) / 100
   const showLeftoverIfGearCash =
     monthCashMade.sold !== 0 || monthCashMade.nonGear > 0
-  const variableBudgetIfCashMade =
-    Math.round(
-      (insightVariableBudget + monthLedgerCashInTotal + cashMadeForIncome) *
-        100,
-    ) / 100
-  const leftOfVariableIfCashMade =
-    Math.round(
-      (variableBudgetIfCashMade -
-        insightVariableSpent +
-        monthVariableRefundTotal) *
-        100,
-    ) / 100
   const actualVariableNetSpent =
     Math.round((actualVariableSpent - actualVariableRefunds) * 100) / 100
   /** Same as actualVariableNetSpent — use for Variable budget used / meters / OVER. */
@@ -1449,9 +1438,73 @@ export default function App() {
     setViewingScreenshotFile(null)
     setScreenshotOcrMatchIds(null)
     setScreenshotOcrBusy(false)
+    setImportManualOpen(false)
+  }
+
+  function syncImportAggregates(
+    importId: string,
+    allTransactions: Transaction[],
+  ) {
+    const linked = allTransactions.filter((t) => t.importId === importId)
+    const monthIds = [...new Set(linked.map((t) => t.monthId))].sort()
+    const netAmount = linked.reduce(
+      (sum, t) => sum + (isMoneyIn(t) ? -t.amount : t.amount),
+      0,
+    )
+    setImports((prev) => {
+      const next = prev.map((item) =>
+        item.id === importId
+          ? {
+              ...item,
+              transactionCount: linked.length,
+              netAmount: Math.round(netAmount * 100) / 100,
+              monthIds: monthIds.length > 0 ? monthIds : item.monthIds,
+            }
+          : item,
+      )
+      saveImports(next)
+      return next
+    })
+  }
+
+  function addTransactionToImport(
+    importId: string,
+    tx: Transaction,
+    sourceFile?: string | null,
+  ) {
+    const stamped: Transaction = {
+      ...tx,
+      importId,
+      sourceFile: sourceFile?.trim() || tx.sourceFile,
+      source: tx.source === 'seed' ? 'manual' : tx.source,
+    }
+    setTransactions((prev) => {
+      const next = [stamped, ...prev]
+      saveTransactions(next)
+      syncImportAggregates(importId, next)
+      return next
+    })
+    if (stamped.monthId) setMonthId(stamped.monthId)
+    return stamped
+  }
+
+  function duplicateTransaction(tx: Transaction): Transaction {
+    const copy: Transaction = {
+      ...tx,
+      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    }
+    setTransactions((prev) => {
+      const next = [copy, ...prev]
+      saveTransactions(next)
+      if (copy.importId) syncImportAggregates(copy.importId, next)
+      return next
+    })
+    if (copy.monthId) setMonthId(copy.monthId)
+    return copy
   }
 
   function openStatement(importId: string) {
+    setImportManualOpen(false)
     const item = imports.find((row) => row.id === importId)
     const linked = transactions.filter((t) => t.importId === importId)
     if (linked.length > 0) {
@@ -1936,6 +1989,7 @@ export default function App() {
     setTransactions((prev) => {
       const next = prev.filter((t) => t.id !== tx.id)
       saveTransactions(next, { allowEmpty: next.length === 0 })
+      if (tx.importId) syncImportAggregates(tx.importId, next)
       return next
     })
     return true
@@ -2778,7 +2832,6 @@ export default function App() {
           <div
             className={[
               'overview-quiet-strip',
-              showFlipProfit ? 'with-flip' : '',
               showLedgerCashIn ? 'with-cash-in' : '',
             ]
               .filter(Boolean)
@@ -2809,64 +2862,6 @@ export default function App() {
                   {monthLedgerCashIns.length} ledger cash-in
                   {monthLedgerCashIns.length === 1 ? '' : 's'} this month · not
                   gear
-                </p>
-              </div>
-            ) : null}
-            {showFlipProfit ? (
-              <div>
-                <span className="stat-label">Cash infusion · Gear flips</span>
-                <div className="quiet-strip-pair" role="group">
-                  <div>
-                    <span className="stat-micro-label">Profit</span>
-                    <strong
-                      className={
-                        monthFlipProfit.profit > 0
-                          ? 'good'
-                          : monthFlipProfit.profit < 0
-                            ? 'bad'
-                            : undefined
-                      }
-                    >
-                      {monthFlipProfit.profit > 0 ? '+' : ''}
-                      {formatMoney(monthFlipProfit.profit)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="stat-micro-label">Total cash made</span>
-                    <strong
-                      className={
-                        cashMadeForIncome < 0
-                          ? 'bad'
-                          : cashMadeForIncome > 0
-                            ? 'good'
-                            : undefined
-                      }
-                    >
-                      {formatMoney(cashMadeForIncome)}
-                    </strong>
-                  </div>
-                </div>
-                <p className="stat-sub">
-                  Cost {formatMoney(monthFlipProfit.purchased)}
-                  {monthFlipProfit.sellCount > 0
-                    ? ` · ${monthFlipProfit.sellCount} sell${
-                        monthFlipProfit.sellCount === 1 ? '' : 's'
-                      }`
-                    : ''}
-                  {monthCashMade.nonGear > 0
-                    ? ` · −${formatMoney(monthCashMade.nonGear)} non-gear (cash pool, not income)`
-                    : ''}
-                  {' · '}
-                  <button
-                    type="button"
-                    className="text-link quiet-strip-link"
-                    onClick={() => {
-                      writeGearSubTab('cash')
-                      setTab('gear')
-                    }}
-                  >
-                    Open Gear flips
-                  </button>
                 </p>
               </div>
             ) : null}
@@ -2902,27 +2897,6 @@ export default function App() {
                   {formatMoney(insightStillAvailable)} left
                 </span>
               </p>
-              {showFlipProfit &&
-              (cashMadeForIncome !== 0 || monthCashMade.sold > 0) ? (
-                <p className="stat-sub what-if-cash-made">
-                  If + total cash made →{' '}
-                  {formatMoney(variableBudgetIfCashMade)}
-                  {' · '}
-                  <span
-                    className={
-                      leftOfVariableIfCashMade >= 0 ? 'good' : 'bad'
-                    }
-                  >
-                    {formatMoney(leftOfVariableIfCashMade)} left
-                  </span>
-                  {monthVariableRefundTotal > 0 ? (
-                    <>
-                      {' '}
-                      (incl. {formatMoney(monthVariableRefundTotal)} cashback)
-                    </>
-                  ) : null}
-                </p>
-              ) : null}
             </div>
             <div>
               <span className="stat-label">Left of variable</span>
@@ -4557,43 +4531,84 @@ export default function App() {
                   }
                 />
                 <div className="statement-charges">
+                  <div className="statement-charges-toolbar">
+                    {viewingImport.sourceKind === 'screenshot' &&
+                    statementPageFiles.length > 1 &&
+                    statementTransactions.length > 0 ? (
+                      <p className="hint statement-charges-hint">
+                        {screenshotOcrBusy
+                          ? 'Matching this screenshot… · '
+                          : ''}
+                        Showing {statementTransactions.length} charge
+                        {statementTransactions.length === 1 ? '' : 's'} from
+                        this screenshot
+                        {statementTransactionsAll.length !==
+                        statementTransactions.length
+                          ? ` (${statementTransactionsAll.length} in the whole batch)`
+                          : ''}
+                      </p>
+                    ) : (
+                      <span className="statement-charges-toolbar-spacer" />
+                    )}
+                    <button
+                      type="button"
+                      className={
+                        importManualOpen ? 'ghost' : 'primary'
+                      }
+                      onClick={() =>
+                        setImportManualOpen((open) => !open)
+                      }
+                    >
+                      {importManualOpen
+                        ? 'Cancel manual expense'
+                        : 'Log expense'}
+                    </button>
+                  </div>
+                  {importManualOpen ? (
+                    <div className="statement-manual-log">
+                      <LogExpenseForm
+                        key={`import-manual-${viewingImport.id}-${viewingScreenshotFile ?? 'all'}`}
+                        defaultPersonId={viewingImport.personId}
+                        defaultAccountId={viewingImport.primaryAccountId}
+                        defaultDate={
+                          statementTransactions[0]?.date ??
+                          `${monthId}-15`
+                        }
+                        onCancel={() => setImportManualOpen(false)}
+                        onSave={(tx) => {
+                          addTransactionToImport(
+                            viewingImport.id,
+                            tx,
+                            viewingScreenshotFile ?? viewingImport.fileName,
+                          )
+                          setImportManualOpen(false)
+                        }}
+                      />
+                    </div>
+                  ) : null}
                   {screenshotOcrBusy &&
-                  statementTransactions.length === 0 ? (
+                  statementTransactions.length === 0 &&
+                  !importManualOpen ? (
                     <p className="empty-note">
                       Reading this screenshot to find its charges…
                     </p>
-                  ) : statementTransactions.length === 0 ? (
+                  ) : statementTransactions.length === 0 &&
+                    !importManualOpen ? (
                     <p className="empty-note">
                       {statementTransactionsAll.length > 0
-                        ? 'No charges matched this screenshot — try another page, or re-upload so charges are tagged per image.'
-                        : 'No charges found for this import (it may have been removed).'}
+                        ? 'No charges matched this screenshot — try another page, or re-upload so charges are tagged per image. Or log a missing expense above.'
+                        : 'No charges found for this import — log an expense above, or the import may have been removed.'}
                     </p>
-                  ) : (
-                    <>
-                      {viewingImport.sourceKind === 'screenshot' &&
-                      statementPageFiles.length > 1 ? (
-                        <p className="hint statement-charges-hint">
-                          {screenshotOcrBusy
-                            ? 'Matching this screenshot… · '
-                            : ''}
-                          Showing {statementTransactions.length} charge
-                          {statementTransactions.length === 1 ? '' : 's'} from
-                          this screenshot
-                          {statementTransactionsAll.length !==
-                          statementTransactions.length
-                            ? ` (${statementTransactionsAll.length} in the whole batch)`
-                            : ''}
-                        </p>
-                      ) : null}
-                      <TransactionTable
-                        transactions={statementTransactions}
-                        showCategory
-                        showAccount
-                        onUpdate={updateTransaction}
-                        onDelete={deleteTransaction}
-                      />
-                    </>
-                  )}
+                  ) : statementTransactions.length > 0 ? (
+                    <TransactionTable
+                      transactions={statementTransactions}
+                      showCategory
+                      showAccount
+                      onUpdate={updateTransaction}
+                      onDelete={deleteTransaction}
+                      onDuplicate={duplicateTransaction}
+                    />
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -4928,18 +4943,32 @@ function IconTxClose() {
   )
 }
 
+function IconTxDuplicate() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden focusable="false">
+      <path
+        fill="currentColor"
+        d="M5.5 2A1.5 1.5 0 0 0 4 3.5v8A1.5 1.5 0 0 0 5.5 13h6A1.5 1.5 0 0 0 13 11.5v-8A1.5 1.5 0 0 0 11.5 2h-6ZM5 3.5a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-.5.5h-6a.5.5 0 0 1-.5-.5v-8ZM2.5 5a.5.5 0 0 0-.5.5v7A2.5 2.5 0 0 0 4.5 15h6a.5.5 0 0 0 0-1h-6A1.5 1.5 0 0 1 3 12.5v-7a.5.5 0 0 0-.5-.5Z"
+      />
+    </svg>
+  )
+}
+
 function TransactionTable({
   transactions,
   showCategory,
   showAccount = true,
   onUpdate,
   onDelete,
+  onDuplicate,
 }: {
   transactions: Transaction[]
   showCategory: boolean
   showAccount?: boolean
   onUpdate?: (tx: Transaction) => void
   onDelete?: (tx: Transaction) => boolean | void
+  /** Returns the new copy so the row can open in edit mode. */
+  onDuplicate?: (tx: Transaction) => Transaction
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const editable = Boolean(onUpdate)
@@ -4995,6 +5024,20 @@ function TransactionTable({
                 {isMoneyIn(t) ? '+' : '−'}
                 {formatMoney(t.amount)}
               </span>
+              {onDuplicate ? (
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="Duplicate charge"
+                  aria-label={`Duplicate ${t.merchant}`}
+                  onClick={() => {
+                    const copy = onDuplicate(t)
+                    setEditingId(copy.id)
+                  }}
+                >
+                  <IconTxDuplicate />
+                </button>
+              ) : null}
               {editable ? (
                 <button
                   type="button"
